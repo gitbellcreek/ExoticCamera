@@ -88,6 +88,9 @@ Each photo records its destination the moment it is taken, so switching layers
 never redirects shots that are already queued — the queue view marks any photo
 bound for somewhere other than the current layer.
 
+There is a Snake behind the About screen. It is 4 KB, it only ticks while its own
+sheet is open, and it is the one part of this app with no bug table.
+
 ## Data written
 
 On the Exotics layer (Esri GNSS metadata schema, attachments enabled):
@@ -188,6 +191,7 @@ js/store.js     IndexedDB — the photo queue and key/value store
 js/arcgis.js    auth, layer metadata, addFeatures + addAttachment, retry/backoff
 js/exif.js      reads and writes the EXIF block carrying position and heading
 js/report.js    problem reports → the ExoticCameraBugs table
+js/snake.js     the Snake behind About
 js/sound.js     synthesised UI sounds
 js/app.js       camera, compass maths, sync loop, UI wiring
 sw.js           app-shell cache + background sync

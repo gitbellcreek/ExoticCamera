@@ -967,8 +967,9 @@
   }
 
   function closeSheets() {
+    if (self.Snake) Snake.close();          // never leave the game ticking behind a sheet
     ['menu', 'queue-panel', 'settings-panel', 'about-panel', 'signin-panel', 'install-panel',
-     'layer-panel', 'bug-panel', 'import-panel'].forEach(function (id) {
+     'layer-panel', 'bug-panel', 'import-panel', 'snake-panel'].forEach(function (id) {
       var el = $(id);
       if (!el || el.classList.contains('hidden')) return;
       el.classList.remove('open');
@@ -1417,6 +1418,11 @@
     $('s-save').addEventListener('click', saveSettings);
     $('s-close').addEventListener('click', closeSheets);
     $('a-close').addEventListener('click', closeSheets);
+    $('a-snake').addEventListener('click', function () {
+      openSheet('snake-panel');
+      Snake.open();
+    });
+    $('snake-close').addEventListener('click', closeSheets);
     $('s-quality').addEventListener('input', function () { $('s-quality-out').textContent = this.value; });
     $('s-probe').addEventListener('click', function () {
       $('s-schema').textContent = 'Reading…';
@@ -1476,7 +1482,10 @@
     document.addEventListener('click', function (e) {
       if (e.target.classList.contains('sheet')) closeSheets();
     });
-    window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheets(); });
+    window.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') return closeSheets();
+      if (sheetOpen('snake-panel')) Snake.keydown(e);
+    });
 
     window.addEventListener('beforeinstallprompt', function (e) {
       e.preventDefault();
@@ -1507,6 +1516,7 @@
 
   function boot() {
     watchForProblems();
+    if (self.Snake) Snake.attach($('snake-canvas'));
     Report.note('boot', navigator.userAgent.slice(0, 120));
     buildDial();
     renderHeading();
