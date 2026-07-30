@@ -1,0 +1,194 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0d1117">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Exotic Camera">
+<title>Exotic Camera</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="app.css">
+
+<div id="viewfinder">
+  <video id="preview" playsinline muted autoplay></video>
+  <div id="novideo" class="novideo hidden">
+    <p id="novideo-msg">Camera not started</p>
+    <button class="btn" id="start-cam">Enable camera</button>
+    <p class="hint">Or use the system camera:</p>
+    <label class="btn ghost">
+      Pick / take a photo
+      <input type="file" id="file-fallback" accept="image/*" capture="environment" hidden>
+    </label>
+  </div>
+</div>
+
+<div id="flash" aria-hidden="true"></div>
+
+<!-- ── top bar: compass + status ─────────────────────────────── -->
+<header id="topbar">
+  <div id="compass" role="img" aria-label="Compass">
+    <svg viewBox="0 0 200 200" id="compass-svg">
+      <defs>
+        <radialGradient id="dialGrad" cx="50%" cy="42%" r="62%">
+          <stop offset="0%" stop-color="#20293a"/>
+          <stop offset="100%" stop-color="#0b0f16"/>
+        </radialGradient>
+      </defs>
+      <circle cx="100" cy="100" r="95" fill="url(#dialGrad)" stroke="#3d4a63" stroke-width="2"/>
+      <g id="dial"><!-- ticks, needle and hub, injected by JS --></g>
+      <g id="labels"><!-- cardinal letters, held upright by JS --></g>
+      <!-- fixed lubber line / index pointer -->
+      <path d="M100 6 l9 17 h-18 z" fill="#ffcf5c"/>
+    </svg>
+    <div id="heading-read"><span id="heading-deg">---</span><span class="unit">°</span><span id="heading-card">--</span></div>
+  </div>
+
+  <div id="status">
+    <button class="chip" id="chip-net" title="Connection"><span class="dot"></span><span class="label">…</span></button>
+    <button class="chip" id="chip-queue" title="Pending uploads"><span class="ico">⇪</span><span class="label">0</span></button>
+    <button class="chip" id="chip-gps" title="GPS accuracy"><span class="ico">◎</span><span class="label">--</span></button>
+  </div>
+
+  <button id="menu-btn" aria-label="Menu" aria-haspopup="dialog"><span></span><span></span><span></span></button>
+</header>
+
+<!-- ── shutter row ───────────────────────────────────────────── -->
+<footer id="controls">
+  <button id="last-shot" class="thumb" aria-label="Upload queue"></button>
+  <button id="shutter" aria-label="Take picture"><span class="ring"></span><span class="core"></span></button>
+  <button id="flip-cam" class="round" aria-label="Switch camera">⟳</button>
+</footer>
+
+<div id="toasts" aria-live="polite"></div>
+
+<!-- ── menu ──────────────────────────────────────────────────── -->
+<div id="menu" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Menu">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+
+    <section class="acct">
+      <div>
+        <div class="acct-name" id="acct-name">Not signed in</div>
+        <div class="acct-sub" id="acct-sub">ArcGIS Online</div>
+      </div>
+      <button class="btn small" id="auth-btn">Sign in</button>
+    </section>
+
+    <nav class="menu-list">
+      <button class="item" id="mi-queue"><span class="i">⇪</span><span>Upload queue<em id="mi-queue-sub">nothing pending</em></span></button>
+      <button class="item" id="mi-sync"><span class="i">↻</span><span>Sync now<em>push queued photos</em></span></button>
+      <button class="item" id="mi-settings"><span class="i">⚙</span><span>Settings<em>layer, quality, sounds</em></span></button>
+      <button class="item" id="mi-reinstall"><span class="i">⤓</span><span>Reinstall app<em>fetch latest code from GitHub Pages</em></span></button>
+      <button class="item" id="mi-about"><span class="i">ⓘ</span><span>About<em id="mi-about-sub">v0.0.0</em></span></button>
+    </nav>
+  </div>
+</div>
+
+<!-- ── queue panel ───────────────────────────────────────────── -->
+<div id="queue-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Upload queue">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Upload queue</h2>
+    <div id="queue-list" class="queue-list"></div>
+    <div class="row">
+      <button class="btn" id="q-retry">Retry all</button>
+      <button class="btn ghost" id="q-clear-done">Clear sent</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── settings panel ────────────────────────────────────────── -->
+<div id="settings-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Settings">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Settings</h2>
+
+    <label class="fld"><span>Feature service URL</span>
+      <input type="url" id="s-url" inputmode="url" spellcheck="false" autocapitalize="off"></label>
+    <label class="fld"><span>Layer id</span>
+      <input type="number" id="s-layer" min="0" step="1"></label>
+    <label class="fld"><span>OAuth app id (client id)</span>
+      <input type="text" id="s-appid" spellcheck="false" autocapitalize="off" placeholder="from ArcGIS &rsaquo; Content &rsaquo; App"></label>
+    <label class="fld"><span>Portal</span>
+      <input type="url" id="s-portal" spellcheck="false" autocapitalize="off"></label>
+    <p class="hint">Redirect URI to register on the ArcGIS app: <code id="s-redirect"></code></p>
+
+    <label class="fld"><span>Image long edge (px)</span>
+      <input type="number" id="s-maxdim" min="480" max="4096" step="80"></label>
+    <label class="fld"><span>JPEG quality</span>
+      <input type="range" id="s-quality" min="0.4" max="0.95" step="0.05">
+      <output id="s-quality-out"></output></label>
+
+    <label class="fld chk"><input type="checkbox" id="s-sound"><span>Sounds</span></label>
+    <label class="fld chk"><input type="checkbox" id="s-haptics"><span>Vibration</span></label>
+    <label class="fld chk"><input type="checkbox" id="s-autosync"><span>Auto-upload when online</span></label>
+
+    <details class="fld-details">
+      <summary>Field mapping</summary>
+      <p class="hint">Blank = auto-detect from the layer, or skip if the layer has no matching field.</p>
+      <label class="fld"><span>Heading</span><input type="text" id="s-f-heading" spellcheck="false"></label>
+      <label class="fld"><span>Latitude</span><input type="text" id="s-f-lat" spellcheck="false"></label>
+      <label class="fld"><span>Longitude</span><input type="text" id="s-f-lon" spellcheck="false"></label>
+      <label class="fld"><span>Accuracy</span><input type="text" id="s-f-accuracy" spellcheck="false"></label>
+      <label class="fld"><span>Altitude</span><input type="text" id="s-f-altitude" spellcheck="false"></label>
+      <label class="fld"><span>Captured (date)</span><input type="text" id="s-f-captured" spellcheck="false"></label>
+      <label class="fld"><span>Notes</span><input type="text" id="s-f-notes" spellcheck="false"></label>
+      <label class="fld"><span>Device</span><input type="text" id="s-f-device" spellcheck="false"></label>
+      <button class="btn ghost small" id="s-probe">Read layer schema</button>
+      <div id="s-schema" class="hint"></div>
+    </details>
+
+    <div class="row">
+      <button class="btn" id="s-save">Save</button>
+      <button class="btn ghost" id="s-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── about panel ───────────────────────────────────────────── -->
+<div id="about-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="About">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Exotic Camera</h2>
+    <p class="hint" id="about-body"></p>
+    <div class="row"><button class="btn ghost" id="a-close">Close</button></div>
+  </div>
+</div>
+
+<!-- ── sign-in panel ─────────────────────────────────────────── -->
+<div id="signin-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Sign in">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Sign in to ArcGIS</h2>
+    <p class="hint">Everything on this service needs a token, so each user signs in with their own ArcGIS account. Nothing but the resulting token is kept on the device.</p>
+
+    <button class="btn" id="si-oauth">Sign in with ArcGIS (OAuth)</button>
+    <p class="hint">Needs an app id in Settings. Preferred — the app never sees your password.</p>
+
+    <details class="fld-details">
+      <summary>Sign in with username &amp; password</summary>
+      <label class="fld"><span>Username</span>
+        <input type="text" id="si-user" autocomplete="username" spellcheck="false" autocapitalize="off"></label>
+      <label class="fld"><span>Password</span>
+        <input type="password" id="si-pass" autocomplete="current-password"></label>
+      <button class="btn" id="si-go">Sign in</button>
+      <p class="hint">The password is sent straight to the portal for a token and is never stored.</p>
+    </details>
+
+    <details class="fld-details">
+      <summary>Paste a token</summary>
+      <label class="fld"><span>Token</span><input type="text" id="si-token" spellcheck="false"></label>
+      <button class="btn ghost" id="si-token-go">Use token</button>
+    </details>
+
+    <div class="row"><button class="btn ghost" id="si-close">Close</button></div>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/store.js"></script>
+<script src="js/arcgis.js"></script>
+<script src="js/sound.js"></script>
+<script src="js/app.js"></script>
