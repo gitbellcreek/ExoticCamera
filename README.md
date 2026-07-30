@@ -70,8 +70,8 @@ the app asks for a sign-in.
 
 ## Hosting
 
-Push to `main` and the included workflow publishes the repo root to GitHub Pages
-(enable **Settings → Pages → Source: GitHub Actions** once). The workflow stamps
+The included workflow publishes the repo root to GitHub Pages on every push to
+the default branch, and switches Pages on itself the first time it runs. It stamps
 the commit sha into `sw.js` and `js/config.js`, which is what makes each deploy
 invalidate the old cache and show up in **Menu → About**.
 
