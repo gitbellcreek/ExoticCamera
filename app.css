@@ -196,6 +196,9 @@ body.syncing #topbar::after {
 .btn.small { padding: 8px 12px; font-size: 13px; }
 
 .row { display: flex; gap: 10px; margin-top: 16px; }
+.btn.wide { display: block; width: 100%; text-align: center; margin-top: 8px; }
+.bar { height: 6px; border-radius: 3px; background: #0d131d; overflow: hidden; margin: 10px 0; }
+.bar-fill { height: 100%; width: 0; background: #2a6df0; transition: width .2s ease; }
 
 /* segmented layer picker */
 .seg { display: flex; gap: 8px; flex-wrap: wrap; }

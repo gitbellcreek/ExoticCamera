@@ -15,9 +15,9 @@
       layerId: 0
     },
     {
-      id: 'exotics',
-      name: 'Exotics',
-      serviceUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/Exotics_Camera_Points/FeatureServer',
+      id: 'elapp',
+      name: 'ELAPP All',
+      serviceUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/El_Rat_Generic/FeatureServer',
       layerId: 0
     }
   ];

@@ -27,6 +27,13 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
   the camera roll by itself, so this is the only route; per-shot sharing is available
   as a setting but off by default, since a sheet after every frame interrupts
   shooting.
+- **Photos already on the phone** can be added from the queue or from Settings.
+  Each one's own EXIF is read: position, altitude, the camera's position error,
+  the capture time, and `GPSImgDirection` where the camera recorded a compass
+  heading (noting whether it was true or magnetic north). Photos with no location
+  are skipped and counted, since there is nothing to map them to. Works with what
+  iOS and Android hand over from the picker — the EXIF block is read the same way
+  whether it arrives as JPEG or HEIC.
 - **Changed your mind?** While a photo is still in the queue, the queue view can
   delete it from the layer again (⌫). Once the queue is cleared, that has to be done
   in ArcGIS.
@@ -63,12 +70,12 @@ Settings, where a custom service URL can be entered instead):
 | Name | Service |
 | --- | --- |
 | **Central** (default) | `…/Iphone_Images/FeatureServer/0` |
-| **Exotics** | `…/Exotics_Camera_Points/FeatureServer/0` |
+| **ELAPP All** | `…/El_Rat_Generic/FeatureServer/0` |
 
 They have different schemas, so the field mapping is resolved per layer from the
 live definition rather than hard-coded. On Central the heading lands in
 `direction`, the time in `datetaken`, and the attachment name in `filename`; on
-Exotics the full Esri GNSS set is used. Anything a layer has no home for is
+ELAPP All the full Esri GNSS set is used. Anything a layer has no home for is
 simply not sent.
 
 Each photo records its destination the moment it is taken, so switching layers
@@ -124,7 +131,9 @@ the snapshot query returns anything unexpected rather than assuming an empty
 layer. A `where=1=1` delete here destroys real field data — with no undo, since
 neither service has sync or archiving enabled.
 
-Write tests point at Exotics; Central holds real photos and is only ever read.
+Both shipped layers hold real data, so write tests point at a scratch layer
+entered by hand (which also exercises the custom-URL path); Central and ELAPP All
+are only ever read.
 
 ## Signing in
 
@@ -171,6 +180,7 @@ app.css         all styling
 js/config.js    defaults, field mapping, settings persistence
 js/store.js     IndexedDB — the photo queue and key/value store
 js/arcgis.js    auth, layer metadata, addFeatures + addAttachment, retry/backoff
+js/exif.js      reads position and heading out of a photo's own EXIF
 js/report.js    problem reports → the ExoticCameraBugs table
 js/sound.js     synthesised UI sounds
 js/app.js       camera, compass maths, sync loop, UI wiring
@@ -186,6 +196,11 @@ JPEG; on iOS that write fails for a photo that has survived an app restart, whic
 strands it in the queue while newer photos upload past it. Queue metadata must
 stay small enough that a write cannot fail. `Store.photo(id)` fetches the bytes
 when they are actually needed. The v1 → v2 upgrade moves existing photos across.
+
+The GPS readout reflects what is actually held, not the last callback: a
+geolocation `TIMEOUT` is routine on iOS and says nothing about the fix already in
+hand, so the chip keeps showing it, ages it, and only says *no fix* when there
+genuinely isn't one.
 
 Retries distinguish *no signal* from *the server said no*: a connection failure
 does not raise the attempt count and caps its wait at a minute, and reconnecting

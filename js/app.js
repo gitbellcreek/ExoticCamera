@@ -18,6 +18,9 @@
     headingSource: null,
     headingAccuracy: null,
     pos: null,
+    posAt: 0,
+    gpsError: null,
+    gpsDenied: false,
     online: navigator.onLine,
     flushing: false,
     busy: false,
@@ -276,22 +279,69 @@
 
   /* ───────────────────────────── location ─────────────────────────── */
 
+  function fixAge() {
+    return state.posAt ? Date.now() - state.posAt : Infinity;
+  }
+
+  function ago(ms) {
+    var s = Math.round(ms / 1000);
+    return s < 60 ? s + 's' : Math.round(s / 60) + 'm';
+  }
+
+  /**
+   * The chip reflects what we actually hold. A geolocation TIMEOUT is routine on
+   * iOS and says nothing about the fix already in hand — blanking the readout to
+   * "no fix" while photos were still being placed from that fix was simply a lie.
+   */
+  function renderGPS() {
+    var chip = $('chip-gps');
+    var label = chip.querySelector('.label');
+    if (state.gpsDenied) {
+      chip.className = 'chip bad';
+      label.textContent = 'denied';
+      return;
+    }
+    if (!state.pos) {
+      chip.className = 'chip bad';
+      label.textContent = state.gpsError ? 'searching' : 'no fix';
+      return;
+    }
+    var acc = state.pos.coords.accuracy;
+    var age = fixAge();
+    label.textContent = (acc ? '±' + Math.round(acc) + 'm' : '--') + (age > 45000 ? ' · ' + ago(age) : '');
+    chip.className = 'chip ' + (age > 180000 ? 'bad'
+      : age > 45000 || acc > 30 ? 'warn'
+      : acc <= 10 ? 'ok' : 'warn');
+  }
+
+  var lastGpsNote = 0;
+
   function startGPS() {
     if (!navigator.geolocation) { toast('No GPS on this device', 'warn'); return; }
+    setInterval(renderGPS, 5000);                 // so the age keeps up
     navigator.geolocation.watchPosition(function (p) {
       state.pos = p;
-      var acc = p.coords.accuracy;
-      $('chip-gps').querySelector('.label').textContent = acc ? '±' + Math.round(acc) + 'm' : '--';
-      $('chip-gps').className = 'chip ' + (acc <= 10 ? 'ok' : acc <= 30 ? 'warn' : 'bad');
+      state.posAt = Date.now();
+      state.gpsError = null;
+      state.gpsDenied = false;
+      renderGPS();
       // fall back to course over ground when the phone has no magnetometer
       if (state.headingSource !== 'sensor' && p.coords.speed > 1.5 && p.coords.heading !== null) {
         pushHeading(p.coords.heading, 'gps');
       }
     }, function (err) {
-      $('chip-gps').className = 'chip bad';
-      $('chip-gps').querySelector('.label').textContent = 'no fix';
-      if (err.code === err.PERMISSION_DENIED) toast('Location permission denied — points need it', 'bad', 4000);
-    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
+      state.gpsError = err.code;
+      if (err.code === err.PERMISSION_DENIED) {
+        state.gpsDenied = true;
+        state.pos = null;
+        toast('Location permission denied — points need it', 'bad', 4000);
+      } else if (Date.now() - lastGpsNote > 60000) {
+        // a timeout only means this attempt failed; the last fix still stands
+        lastGpsNote = Date.now();
+        Report.note('gps error', err.code === err.TIMEOUT ? 'timeout' : 'position unavailable');
+      }
+      renderGPS();
+    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 60000 });
   }
 
   /* ───────────────────────────── camera ───────────────────────────── */
@@ -324,12 +374,22 @@
       $('novideo').classList.add('hidden');
       lastFrameTime = -1;
       staleTicks = 0;
+      cameraStartedAt = Date.now();
 
       var track = s.getVideoTracks()[0];
       if (track) {
         track.addEventListener('ended', function () { recoverCamera('track ended'); });
-        track.addEventListener('mute', function () { Report.note('camera muted'); });
-        track.addEventListener('unmute', function () { v.play().catch(function () {}); });
+        track.addEventListener('mute', function () {
+          // routine on iOS, and noisy — record at most one every half minute
+          if (Date.now() - lastMuteNote > 30000) {
+            lastMuteNote = Date.now();
+            Report.note('camera muted (usually harmless)');
+          }
+        });
+        track.addEventListener('unmute', function () {
+          staleTicks = 0;
+          v.play().catch(function () {});
+        });
       }
       return v.play().catch(function () { /* autoplay quirks — the tap already started it */ });
     }).catch(function (e) {
@@ -351,14 +411,32 @@
      preview freezes on its last frame, and the only clue is that nothing
      moves. Flipping the camera fixes it because that builds a new stream. */
 
-  var lastFrameTime = -1, staleTicks = 0, lastRecovery = 0;
+  var lastFrameTime = -1, staleTicks = 0, lastRecovery = 0, cameraStartedAt = 0, lastMuteNote = 0;
+  var GRACE = 6000;                  // a fresh stream needs a moment before it is judged
 
+  function videoTrack() {
+    return state.stream ? state.stream.getVideoTracks()[0] : null;
+  }
+
+  /**
+   * iOS mutes a track constantly — a notification, a focus change, a brief
+   * interruption — and unmutes a moment later with the camera perfectly fine.
+   * Treating `muted` as failure restarts a working camera, so the only signals
+   * trusted here are a track that has ended and a frame clock that has stopped.
+   */
   function cameraHealthy() {
     var v = $('preview');
     if (!state.stream || !v) return false;
-    var t = state.stream.getVideoTracks()[0];
-    if (!t || t.readyState !== 'live' || t.muted) return false;
+    var t = videoTrack();
+    if (!t || t.readyState !== 'live') return false;
     return !!v.videoWidth;
+  }
+
+  function previewStalled() {
+    if (!state.stream) return false;
+    var t = videoTrack();
+    if (!t || t.readyState === 'ended') return true;
+    return staleTicks >= 2;            // ~4s with no new frame
   }
 
   function recoverCamera(why) {
@@ -374,15 +452,18 @@
   function watchCamera() {
     setInterval(function () {
       if (document.visibilityState !== 'visible' || !state.stream) return;
+      if (Date.now() - cameraStartedAt < GRACE) return;   // still warming up
       var v = $('preview');
-      var now = v.currentTime;
-      if (now === lastFrameTime) staleTicks++; else staleTicks = 0;
-      lastFrameTime = now;
+      var t = videoTrack();
+      if (!t || t.readyState === 'ended') return void recoverCamera('track ended');
 
-      if (staleTicks === 1 && v.paused) v.play().catch(function () { /* retried below */ });
-      // ~6s without a new frame while the app is in front: the preview is stuck
-      if (staleTicks >= 3) recoverCamera('no new frames');
-      else if (!cameraHealthy()) recoverCamera('video track not delivering');
+      if (!v.videoWidth) staleTicks++;                    // never produced a frame
+      else if (v.currentTime === lastFrameTime) staleTicks++;
+      else staleTicks = 0;
+      lastFrameTime = v.currentTime;
+
+      if (staleTicks === 1 && v.paused) v.play().catch(function () { /* handled below */ });
+      if (staleTicks >= 3) recoverCamera('no new frames for ~6s');
     }, 2000);
   }
 
@@ -443,7 +524,7 @@
     }
     // A stalled preview shows the last good frame, so a shot taken now would
     // quietly record a stale image at the current GPS fix.
-    if (state.stream && !cameraHealthy()) {
+    if (state.stream && previewStalled()) {
       Sound.error();
       toast('Preview had stalled — restarting, take it again', 'warn', 3500);
       recoverCamera('stalled at the shutter');
@@ -482,6 +563,9 @@
 
   function enqueue(img) {
     var p = state.pos && state.pos.coords;
+    if (p && fixAge() > 120000) {
+      toast('Location is ' + ago(fixAge()) + ' old — move outside for a fresh fix', 'warn', 4000);
+    }
     if (!p) {
       Sound.error();
       toast('No GPS fix yet — photo not saved', 'bad', 4000);
@@ -628,6 +712,107 @@
     f.classList.add('go');
   }
 
+  /* ────────────────── importing photos already on the phone ────────── */
+
+  /** Decode with the camera's own orientation applied, then re-encode to size. */
+  function decodeOriented(file) {
+    if (self.createImageBitmap) {
+      return createImageBitmap(file, { imageOrientation: 'from-image' })
+        .catch(function () { return decodeViaImg(file); });
+    }
+    return decodeViaImg(file);
+  }
+
+  function decodeViaImg(file) {
+    return new Promise(function (res, rej) {
+      var img = new Image();
+      var url = URL.createObjectURL(file);
+      img.onload = function () { URL.revokeObjectURL(url); res(img); };
+      img.onerror = function () { URL.revokeObjectURL(url); rej(new Error('Could not read this image')); };
+      img.src = url;
+    });
+  }
+
+  function importOne(file) {
+    return Exif.read(file).then(function (ex) {
+      if (!ex.found || ex.lat === null || ex.lon === null) {
+        return { skipped: 'no location' };
+      }
+      return decodeOriented(file).then(function (src) {
+        var w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
+        if (!w || !h) throw new Error('Could not read this image');
+        return drawToBlob(src, w, h).then(function (img) {
+          if (src.close) src.close();
+          var item = {
+            id: Store.uuid(),
+            createdAt: ex.taken || file.lastModified || Date.now(),
+            blob: img.blob,
+            thumb: img.thumb,
+            w: img.w, h: img.h,
+            lat: ex.lat,
+            lon: ex.lon,
+            alt: ex.alt,
+            hAcc: ex.hAcc,
+            vAcc: null,
+            speed: ex.speed,
+            course: null,
+            heading: ex.heading === null ? null : Math.round(ex.heading * 10) / 10,
+            headingSource: ex.heading === null ? null : ('exif' + (ex.headingRef === 'M' ? '-mag' : '')),
+            device: ('Imported · ' + (ex.camera || 'unknown camera')).slice(0, 50),
+            source: 'import',
+            serviceUrl: Config.get().serviceUrl,
+            layerId: Config.get().layerId,
+            layerName: Config.layerName(),
+            state: 'pending'
+          };
+          item.filename = photoName(item);
+          return Store.add(item).then(function () {
+            return { added: true, heading: item.heading };
+          });
+        });
+      });
+    }).catch(function (e) {
+      return { skipped: errText(e) };
+    });
+  }
+
+  function importFiles(files) {
+    var list = Array.prototype.slice.call(files || []);
+    if (!list.length) return Promise.resolve();
+
+    var added = 0, noLoc = 0, failed = 0, withHeading = 0, done = 0;
+    $('import-title').textContent = 'Adding ' + list.length + ' photo' + (list.length === 1 ? '' : 's');
+    $('import-summary').textContent = '';
+    $('import-bar').style.width = '0%';
+    $('import-status').textContent = 'Reading…';
+    openSheet('import-panel');
+    Report.note('import started', list.length + ' file(s)');
+
+    return list.reduce(function (chain, file) {
+      return chain.then(function () {
+        return importOne(file).then(function (r) {
+          done++;
+          if (r.added) { added++; if (r.heading !== null && r.heading !== undefined) withHeading++; }
+          else if (r.skipped === 'no location') noLoc++;
+          else failed++;
+          $('import-bar').style.width = Math.round(done / list.length * 100) + '%';
+          $('import-status').textContent = done + ' of ' + list.length + ' read · ' + added + ' added';
+        });
+      });
+    }, Promise.resolve()).then(function () {
+      var parts = [added + ' added' + (withHeading ? ' (' + withHeading + ' with a compass heading)' : '')];
+      if (noLoc) parts.push(noLoc + ' skipped — no location stored in the photo');
+      if (failed) parts.push(failed + ' could not be read');
+      $('import-status').textContent = 'Done.';
+      $('import-summary').innerHTML = parts.map(esc).join('<br>');
+      Report.note('import finished', { added: added, noLoc: noLoc, failed: failed });
+      if (added) { Sound.queued(); } else { Sound.error(); }
+      return refreshCounts().then(function () {
+        if (added && state.online && Config.get().autoSync) sync(true);
+      });
+    });
+  }
+
   /* ─────────────────────────── sync engine ────────────────────────── */
 
   function refreshCounts() {
@@ -748,7 +933,7 @@
 
   function closeSheets() {
     ['menu', 'queue-panel', 'settings-panel', 'about-panel', 'signin-panel', 'install-panel',
-     'layer-panel', 'bug-panel'].forEach(function (id) {
+     'layer-panel', 'bug-panel', 'import-panel'].forEach(function (id) {
       var el = $(id);
       if (!el || el.classList.contains('hidden')) return;
       el.classList.remove('open');
@@ -771,6 +956,7 @@
           : r.state === 'uploading' ? 'uploading…'
           : r.attempts ? 'retry ' + r.attempts + (r.lastError ? ' · ' + esc(r.lastError) : '') : 'waiting';
         var where = r.layerName && r.layerName !== Config.layerName() ? ' → ' + esc(r.layerName) : '';
+        if (r.source === 'import') where = ' · imported' + where;
         return '<div class="qrow ' + r.state + '">' +
           '<div class="qthumb" style="background-image:url(' + (r.thumb || '') + ')"></div>' +
           '<div class="qmeta"><b>' + esc(when) + '</b>' +
@@ -948,9 +1134,10 @@
     return [
       'compass=' + (gotOrientation ? 'live' : listening ? 'listening' : 'off'),
       'hdg=' + (state.heading === null ? 'none' : Math.round(state.heading)),
-      'gps=' + (state.pos ? '±' + Math.round(state.pos.coords.accuracy) + 'm' : 'none'),
+      'gps=' + (state.pos ? '±' + Math.round(state.pos.coords.accuracy) + 'm/' + ago(fixAge()) : 'none') +
+        (state.gpsDenied ? ' denied' : state.gpsError ? ' err' + state.gpsError : ''),
       'cam=' + (state.stream ? (cameraHealthy() ? 'live' : 'stalled') : 'off'),
-      'camstale=' + staleTicks,
+      'camstale=' + staleTicks + (videoTrack() && videoTrack().muted ? ' muted' : ''),
       'standalone=' + (isStandalone() ? 'yes' : 'no'),
       'gesture=' + (needsGesture() ? 'required' : 'no')
     ].join(' ');
@@ -1097,7 +1284,7 @@
   function wire() {
     $('shutter').addEventListener('click', function () { Sound.unlock(); capture(); });
     $('preview').addEventListener('click', function () {
-      if (!cameraHealthy()) { lastRecovery = 0; recoverCamera('tapped the preview'); }
+      if (!cameraHealthy() || previewStalled()) { lastRecovery = 0; recoverCamera('tapped the preview'); }
     });
     $('flip-cam').addEventListener('click', function () {
       state.facing = state.facing === 'environment' ? 'user' : 'environment';
@@ -1141,7 +1328,9 @@
     $('chip-net').addEventListener('click', function () { sync(true); });
     $('chip-gps').addEventListener('click', function () {
       var p = state.pos && state.pos.coords;
-      toast(p ? p.latitude.toFixed(6) + ', ' + p.longitude.toFixed(6) + ' ±' + Math.round(p.accuracy) + 'm' : 'No fix yet');
+      toast(p ? p.latitude.toFixed(6) + ', ' + p.longitude.toFixed(6) + ' ±' + Math.round(p.accuracy) +
+               'm, ' + ago(fixAge()) + ' ago'
+             : state.gpsDenied ? 'Location permission denied' : 'No fix yet');
     });
 
     $('mi-layer').addEventListener('click', function () { renderLayerPicker(); openSheet('layer-panel'); });
@@ -1170,6 +1359,18 @@
           return Store.patch(r.id, { state: 'pending', nextAttemptAt: 0, attempts: 0, lastError: null });
         }));
       }).then(refreshCounts).then(function () { closeSheets(); return sync(true); }).then(renderQueue);
+    });
+    ['import-files', 's-import-files'].forEach(function (id) {
+      $(id).addEventListener('change', function (e) {
+        // FileList is live: clearing the input first would empty it under us
+        var files = Array.prototype.slice.call(e.target.files);
+        e.target.value = '';
+        importFiles(files).then(renderQueue);
+      });
+    });
+    $('import-close').addEventListener('click', function () {
+      closeSheets();
+      renderQueue();
     });
     $('q-save-all').addEventListener('click', function () {
       saveAllToDevice().then(renderQueue);
@@ -1259,7 +1460,10 @@
       refreshCounts().then(function () {
         if (state.online && Config.get().autoSync) sync();
       });
+      staleTicks = 0;
+      lastFrameTime = -1;
       if (!cameraHealthy()) startCamera();
+      else if ($('preview').paused) $('preview').play().catch(function () {});
     });
     window.addEventListener('pagehide', stopCamera);
   }
