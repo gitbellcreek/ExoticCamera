@@ -27,7 +27,9 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .85em; 
 
 /* ── viewfinder ─────────────────────────────────────────────── */
 #viewfinder { position: fixed; inset: 0; background: #000; }
-#preview { width: 100%; height: 100%; object-fit: cover; display: block; }
+/* contain, not cover: show the whole frame that will actually be captured,
+   letterboxed, rather than a cropped preview of a wider photo */
+#preview { width: 100%; height: 100%; object-fit: contain; display: block; }
 
 .novideo {
   position: absolute; inset: 0; display: flex; flex-direction: column;
@@ -239,8 +241,10 @@ body.syncing #topbar::after {
 .qmeta b { display: block; color: var(--txt); font-size: 13px; }
 .qmeta span { display: block; }
 .qsub { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qdel, .qsave { border: 0; background: none; color: var(--dim); font-size: 16px; padding: 8px; }
+.qdel, .qsave, .qunsend { border: 0; background: none; color: var(--dim); font-size: 16px; padding: 8px; }
 .qsave { color: var(--txt); }
+.qunsend { color: var(--warn); }
+.qdel[disabled], .qunsend[disabled] { opacity: .4; }
 
 /* ── landscape ──────────────────────────────────────────────
    Short and wide: move the shutter to a rail on the right so the

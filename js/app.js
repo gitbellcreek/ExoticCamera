@@ -513,9 +513,19 @@
   /** Hand every retained photo over at once — iOS offers "Save N Images". */
   function saveAllToDevice() {
     return Store.all().then(function (rows) {
-      var withPhoto = rows.filter(function (r) { return r.blob; });
+      var withPhoto = rows.filter(function (r) { return r.hasPhoto; }).slice(0, 30);
       if (!withPhoto.length) return toast('No photos still held on the device', 'warn');
 
+      return Promise.all(withPhoto.map(function (r) { return Store.photo(r.id); })).then(function (blobs) {
+        withPhoto = withPhoto.filter(function (r, i) { r.blob = blobs[i]; return !!blobs[i]; });
+        return finishSaveAll(withPhoto);
+      });
+    });
+  }
+
+  function finishSaveAll(withPhoto) {
+    return Promise.resolve().then(function () {
+      if (!withPhoto.length) return toast('No photos still held on the device', 'warn');
       var files = [];
       for (var i = 0; i < withPhoto.length && i < 30; i++) {
         try { files.push(new File([withPhoto[i].blob], photoName(withPhoto[i]), { type: 'image/jpeg' })); }
@@ -543,9 +553,11 @@
     var keep = (Config.get().keepHours || 48) * 3600000;
     return Store.all().then(function (rows) {
       var stale = rows.filter(function (r) {
-        return r.state === 'sent' && r.blob && r.sentAt && Date.now() - r.sentAt > keep;
+        return r.state === 'sent' && r.hasPhoto && r.sentAt && Date.now() - r.sentAt > keep;
       });
-      return Promise.all(stale.map(function (r) { return Store.patch(r.id, { blob: null }); }));
+      return Promise.all(stale.map(function (r) {
+        return Store.dropPhoto(r.id).then(function () { return Store.patch(r.id, { hasPhoto: false }); });
+      }));
     });
   }
 
@@ -581,7 +593,11 @@
     if (online) {
       Sound.online();
       toast('Back online', 'ok');
-      if (Config.get().autoSync) sync();
+      // photos held back by a retry timer are due immediately: the wait was the
+      // connection's fault, not theirs
+      Arc.clearBackoff().then(function () {
+        if (Config.get().autoSync) sync(true);
+      });
     } else {
       Sound.offline();
       buzz([8, 60, 8]);
@@ -701,19 +717,46 @@
           '<span>' + (r.heading === null || r.heading === undefined ? 'no heading' : Math.round(r.heading) + '°') +
           ' · ' + (r.hAcc ? '±' + Math.round(r.hAcc) + 'm' : 'no acc') + where + '</span>' +
           '<span class="qsub">' + sub + '</span></div>' +
-          (r.blob ? '<button class="qsave" data-id="' + r.id + '" aria-label="Save to device">⤓</button>' : '') +
-          '<button class="qdel" data-id="' + r.id + '" aria-label="Delete">✕</button></div>';
+          (r.hasPhoto ? '<button class="qsave" data-id="' + r.id + '" aria-label="Save to device">⤓</button>' : '') +
+          (r.state === 'sent' && r.objectId
+            ? '<button class="qunsend" data-id="' + r.id + '" aria-label="Remove from the layer">⌫</button>'
+            : '') +
+          '<button class="qdel" data-id="' + r.id + '" aria-label="Remove from the queue">✕</button></div>';
       }).join('');
-      var held = rows.filter(function (r) { return r.blob; }).length;
+      var held = rows.filter(function (r) { return r.hasPhoto; }).length;
       $('q-save-hint').textContent = held
         ? held + ' photo(s) still held on this device (' + (Config.get().keepHours || 48) + 'h after upload).'
         : 'No local copies left — they are cleared after upload.';
       Array.prototype.forEach.call(list.querySelectorAll('.qsave'), function (b) {
         b.addEventListener('click', function () {
-          Store.item(b.dataset.id).then(function (r) {
-            if (!r || !r.blob) return toast('Local copy no longer on the device', 'warn');
-            return saveCopy(r.blob, photoName(r)).then(function (done) {
+          Promise.all([Store.item(b.dataset.id), Store.photo(b.dataset.id)]).then(function (r) {
+            if (!r[0] || !r[1]) return toast('Local copy no longer on the device', 'warn');
+            return saveCopy(r[1], photoName(r[0])).then(function (done) {
               if (done) { Sound.tick(); toast('Saved', 'ok'); }
+            });
+          });
+        });
+      });
+
+      // change your mind: take the uploaded photo back off the layer
+      Array.prototype.forEach.call(list.querySelectorAll('.qunsend'), function (b) {
+        b.addEventListener('click', function () {
+          Store.item(b.dataset.id).then(function (r) {
+            if (!r) return;
+            if (!confirm('Delete this photo from ' + (r.layerName || 'the layer') +
+                         ' (OBJECTID ' + r.objectId + ')? This cannot be undone.')) return;
+            b.disabled = true;
+            return Arc.deleteFeature(r).then(function () {
+              Report.note('removed from layer', r.objectId);
+              return Store.remove(r.id);
+            }).then(function () {
+              Sound.tick();
+              toast('Removed from ' + (r.layerName || 'the layer'), 'ok');
+              return renderQueue().then(refreshCounts);
+            }).catch(function (e) {
+              b.disabled = false;
+              Sound.error();
+              toast('Could not remove it: ' + errText(e), 'bad', 4500);
             });
           });
         });

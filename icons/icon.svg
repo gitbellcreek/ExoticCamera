@@ -1,16 +1,34 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <rect width="512" height="512" rx="112" fill="#0b0f16"/>
-  <circle cx="256" cy="256" r="186" fill="none" stroke="#263349" stroke-width="14"/>
-  <g stroke="#61708c" stroke-width="8" stroke-linecap="round">
-    <line x1="256" y1="86" x2="256" y2="120"/>
-    <line x1="256" y1="392" x2="256" y2="426"/>
-    <line x1="86" y1="256" x2="120" y2="256"/>
-    <line x1="392" y1="256" x2="426" y2="256"/>
-  </g>
-  <path d="M256 108 L296 256 L256 236 Z" fill="#ff6b6b"/>
-  <path d="M256 404 L216 256 L256 276 Z" fill="#7f8ea8"/>
-  <path d="M256 108 L216 256 L256 236 Z" fill="#d8574f"/>
-  <path d="M256 404 L296 256 L256 276 Z" fill="#5f6d84"/>
-  <circle cx="256" cy="256" r="46" fill="#131a26" stroke="#8fa3c4" stroke-width="10"/>
-  <circle cx="256" cy="256" r="18" fill="#2a6df0"/>
+  <defs>
+    <linearGradient id="gold" x1="30%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#ffe08a"/>
+      <stop offset="45%" stop-color="#f2b929"/>
+      <stop offset="100%" stop-color="#d18f10"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f7cc55"/>
+      <stop offset="100%" stop-color="#c98708"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="#ffffff"/>
+
+  <!-- handle -->
+  <path d="M256 78c-15 0-27 12-27 27 0 9 4 17 11 22h32c7-5 11-13 11-22 0-15-12-27-27-27z"
+        fill="none" stroke="url(#rim)" stroke-width="15" stroke-linecap="round"/>
+
+  <!-- body: a soft dome flaring into the rim -->
+  <path d="M256 118c-57 0-96 44-100 104-3 44-12 74-27 92-5 6-1 15 7 15h240c8 0 12-9 7-15
+           -15-18-24-48-27-92-4-60-43-104-100-104z"
+        fill="url(#gold)"/>
+
+  <!-- rim -->
+  <rect x="120" y="322" width="272" height="42" rx="21" fill="url(#rim)"/>
+
+  <!-- clapper -->
+  <circle cx="256" cy="392" r="30" fill="url(#rim)"/>
+
+  <!-- highlight, for a bit of shine -->
+  <path d="M212 168c-14 16-21 38-23 62-2 26-5 45-10 60" fill="none" stroke="#fff6d8"
+        stroke-width="18" stroke-linecap="round" opacity=".75"/>
 </svg>

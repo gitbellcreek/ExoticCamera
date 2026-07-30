@@ -4,7 +4,7 @@
   'use strict';
 
   var DB = 'exoticcam';
-  var VERSION = 1;
+  var VERSION = 2;
   var dbp = null;
 
   function open() {
@@ -20,6 +20,29 @@
           q.createIndex('createdAt', 'createdAt');
         }
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv', { keyPath: 'k' });
+
+        /* v2: photos live in their own store.
+           They used to sit on the queue record, so every state change rewrote
+           the whole JPEG — and on iOS that write fails for a photo that has
+           survived an app restart, which strands it in the queue forever while
+           newer photos sail past. Metadata is tiny; keep it that way. */
+        if (!db.objectStoreNames.contains('photos')) db.createObjectStore('photos', { keyPath: 'id' });
+        if (e.oldVersion < 2) {
+          var t = e.target.transaction;
+          var qs = t.objectStore('queue');
+          var ps = t.objectStore('photos');
+          qs.openCursor().onsuccess = function (ev) {
+            var cur = ev.target.result;
+            if (!cur) return;
+            var row = cur.value;
+            if (row && row.blob) {
+              ps.put({ id: row.id, blob: row.blob });
+              delete row.blob;
+              cur.update(row);
+            }
+            cur.continue();
+          };
+        }
       };
       req.onsuccess = function () { resolve(req.result); };
       req.onerror = function () {
@@ -87,6 +110,23 @@
       return tx('kv', 'readwrite', function (s) { s.delete(k); });
     },
 
+    /* ---- photos: bytes only, written once and never rewritten ---- */
+    photo: function (id) {
+      return open().then(function (db) {
+        return reqp(db.transaction('photos', 'readonly').objectStore('photos').get(id));
+      }).then(function (r) { return r ? r.blob : null; });
+    },
+
+    dropPhoto: function (id) {
+      return tx('photos', 'readwrite', function (s) { s.delete(id); });
+    },
+
+    photoIds: function () {
+      return open().then(function (db) {
+        return reqp(db.transaction('photos', 'readonly').objectStore('photos').getAllKeys());
+      }).then(function (k) { return k || []; });
+    },
+
     /* ---- queue ---- */
     add: function (item) {
       item.id = item.id || uuid();
@@ -94,11 +134,27 @@
       item.state = item.state || 'pending';
       item.attempts = item.attempts || 0;
       item.nextAttemptAt = item.nextAttemptAt || 0;
-      return tx('queue', 'readwrite', function (s) { s.put(item); }).then(function () { return item; });
+      var blob = item.blob;
+      delete item.blob;
+      item.hasPhoto = !!blob;
+
+      return open().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          // one transaction over both stores: never a queue row without its photo
+          var t = db.transaction(['queue', 'photos'], 'readwrite');
+          t.objectStore('queue').put(item);
+          if (blob) t.objectStore('photos').put({ id: item.id, blob: blob });
+          t.oncomplete = function () { resolve(item); };
+          t.onerror = function () { reject(dbError(t, 'Could not save the photo to the device')); };
+          t.onabort = function () { reject(dbError(t, 'Could not save the photo — the device may be out of space')); };
+        });
+      });
     },
 
     put: function (item) {
-      return tx('queue', 'readwrite', function (s) { s.put(item); }).then(function () { return item; });
+      var copy = {};
+      Object.keys(item).forEach(function (k) { if (k !== 'blob') copy[k] = item[k]; });
+      return tx('queue', 'readwrite', function (s) { s.put(copy); }).then(function () { return copy; });
     },
 
     patch: function (id, patch) {
@@ -112,6 +168,7 @@
             var it = e.target.result;
             if (!it) return;
             Object.keys(patch).forEach(function (k) { it[k] = patch[k]; });
+            delete it.blob;              // bytes never travel with a metadata write
             out = it;
             s.put(it);
           };
@@ -128,10 +185,18 @@
     },
 
     all: function () {
-      return open().then(function (db) {
-        return reqp(db.transaction('queue', 'readonly').objectStore('queue').getAll());
-      }).then(function (rows) {
-        return (rows || []).sort(function (a, b) { return b.createdAt - a.createdAt; });
+      return Promise.all([
+        open().then(function (db) {
+          return reqp(db.transaction('queue', 'readonly').objectStore('queue').getAll());
+        }),
+        Store.photoIds()
+      ]).then(function (r) {
+        var have = {};
+        r[1].forEach(function (id) { have[id] = true; });
+        return (r[0] || []).map(function (row) {
+          row.hasPhoto = !!have[row.id] || !!row.blob;
+          return row;
+        }).sort(function (a, b) { return b.createdAt - a.createdAt; });
       });
     },
 
@@ -144,7 +209,8 @@
     },
 
     remove: function (id) {
-      return tx('queue', 'readwrite', function (s) { s.delete(id); });
+      return tx('queue', 'readwrite', function (s) { s.delete(id); })
+        .then(function () { return Store.dropPhoto(id); });
     },
 
     removeSent: function () {

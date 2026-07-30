@@ -21,10 +21,17 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
 - **Portrait and landscape.** Turned sideways the shutter moves to a right-hand rail
   under your thumb, and the status chips go inline, so a short landscape viewport is
   not wasted.
-- **Keeps a copy on the phone.** Each shot is also handed to the device — the share
-  sheet on iOS (tap *Save Image* for Photos; a web app cannot write to the camera roll
-  by itself), a plain download elsewhere. Local copies stay in the queue for 48 hours
-  after upload so you can still save them from the queue view.
+- **Keeps a copy on the phone.** Local copies stay for 48 hours after upload, and
+  **Upload queue → Save all** hands the batch to the device in one go — the share
+  sheet on iOS, where *Save N Images* puts them in Photos. A web app cannot write to
+  the camera roll by itself, so this is the only route; per-shot sharing is available
+  as a setting but off by default, since a sheet after every frame interrupts
+  shooting.
+- **Changed your mind?** While a photo is still in the queue, the queue view can
+  delete it from the layer again (⌫). Once the queue is cleared, that has to be done
+  in ArcGIS.
+- **The viewfinder shows the whole frame** that will be captured, letterboxed, rather
+  than a cropped preview of a wider photo.
 - **Works offline.** Photos go into IndexedDB on the device and upload themselves
   when the connection comes back — including via Background Sync while the app is
   closed, on browsers that support it.
@@ -166,6 +173,17 @@ sw.js           app-shell cache + background sync
 
 `config.js`, `store.js`, `arcgis.js` and `report.js` are loaded by both the page
 and the service worker, so they must never touch `window` or `document`.
+
+**Photo bytes live in their own `photos` store, keyed by queue id — never on the
+queue row.** They used to sit on the row, so every state change rewrote the whole
+JPEG; on iOS that write fails for a photo that has survived an app restart, which
+strands it in the queue while newer photos upload past it. Queue metadata must
+stay small enough that a write cannot fail. `Store.photo(id)` fetches the bytes
+when they are actually needed. The v1 → v2 upgrade moves existing photos across.
+
+Retries distinguish *no signal* from *the server said no*: a connection failure
+does not raise the attempt count and caps its wait at a minute, and reconnecting
+clears every pending timer outright.
 
 Offline hardening, learned the hard way — an offline-first app that shows a black
 screen is worse than one that admits defeat:

@@ -338,9 +338,11 @@
       });
       return step.then(function (oid) {
         if (item.attachmentId) return item.attachmentId;
-        if (!item.blob) return null;                       // point-only record
-        return Arc.addAttachment(oid, item.blob,
-          item.filename || ('photo_' + item.id.slice(0, 8) + '.jpg'), Arc.targetUrl(item));
+        return g.Store.photo(item.id).then(function (blob) {
+          if (!blob) return null;                          // point-only record
+          return Arc.addAttachment(oid, blob,
+            item.filename || ('photo_' + item.id.slice(0, 8) + '.jpg'), Arc.targetUrl(item));
+        });
       }).then(function (aid) {
         // the photo is deliberately kept for a while after upload: it is the only
         // local copy, and the queue view can still hand it to the device
@@ -350,8 +352,40 @@
       });
     },
 
-    backoff: function (attempts) {
+    /** Take an uploaded photo back off the layer. */
+    deleteFeature: function (item) {
+      if (!item || !item.objectId) return Promise.resolve(false);
+      var url = Arc.targetUrl(item);
+      return token().then(function (t) {
+        return postJson(url + '/deleteFeatures', {
+          f: 'json', token: t, objectIds: String(item.objectId)
+        });
+      }).then(function (j) {
+        var res = (j.deleteResults || [])[0];
+        if (!res || !res.success) {
+          throw new Error((res && res.error && res.error.description) || 'The layer refused the delete');
+        }
+        return true;
+      });
+    },
+
+    /**
+     * Being out of signal is not the photo's fault, so it must not push the
+     * retry further and further out — otherwise a shot taken in airplane mode
+     * sits on a half-hour timer while photos taken later upload immediately.
+     */
+    backoff: function (attempts, retryable) {
+      if (retryable) return Math.min(60000, 5000 * Math.max(1, attempts));
       return Math.min(30 * 60000, 15000 * Math.pow(2, Math.max(0, attempts - 1)));
+    },
+
+    /** Anything held back purely by a retry timer becomes due again. */
+    clearBackoff: function () {
+      return g.Store.outstanding().then(function (items) {
+        return Promise.all(items.filter(function (i) { return i.nextAttemptAt; }).map(function (i) {
+          return g.Store.patch(i.id, { nextAttemptAt: 0 });
+        }));
+      });
     },
 
     /**
@@ -389,9 +423,11 @@
               summary.failed++;
               return g.Store.patch(item.id, {
                 state: e.needAuth || e.retryable ? 'pending' : 'error',
-                attempts: attempts,
+                // a connection failure is not evidence that this photo is bad
+                attempts: e.retryable ? (item.attempts || 0) : attempts,
+                netAttempts: e.retryable ? attempts : (item.netAttempts || 0),
                 lastError: e.message,
-                nextAttemptAt: Date.now() + Arc.backoff(attempts)
+                nextAttemptAt: Date.now() + Arc.backoff(attempts, e.retryable)
               }).catch(function () { /* storage itself is failing; report anyway */ })
                 .then(function () { ev('failed', item, e); });
             });
