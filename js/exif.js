@@ -98,7 +98,203 @@
     return null;
   }
 
+  /* ── writing ─────────────────────────────────────────────────────
+     Canvas re-encoding drops every scrap of metadata, so a photo saved back to
+     the phone — or pulled off the layer as an attachment — would carry no
+     position at all. These build a fresh EXIF block and splice it in. */
+
+  function rational(x, den) {
+    den = den || 1000000;
+    var n = Math.round(Math.abs(x) * den);
+    return [n, den];
+  }
+
+  function toDMS(deg) {
+    var a = Math.abs(deg);
+    var d = Math.floor(a);
+    var m = Math.floor((a - d) * 60);
+    var sec = (a - d - m / 60) * 3600;
+    return [[d, 1], [m, 1], rational(sec, 10000)];
+  }
+
+  function ascii(s) {
+    var out = [];
+    for (var i = 0; i < s.length; i++) out.push(s.charCodeAt(i) & 0xff);
+    out.push(0);
+    return out;
+  }
+
+  var W = { BYTE: 1, ASCII: 2, SHORT: 3, LONG: 4, RATIONAL: 5 };
+  var WIDTH = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8 };
+
+  function entryCount(e) {
+    if (e.type === W.ASCII) return e.value.length;
+    if (e.type === W.RATIONAL) return e.value.length / 2;
+    return e.value.length;
+  }
+
+  function ifdBytes(n) { return 2 + n * 12 + 4; }
+
+  /** Serialise IFD0 + Exif IFD + GPS IFD into one little-endian TIFF block. */
+  function buildTiff(ifd0, exifIfd, gpsIfd) {
+    var ifd0Off = 8;
+    var exifOff = ifd0Off + ifdBytes(ifd0.length + (exifIfd.length ? 1 : 0) + (gpsIfd.length ? 1 : 0));
+    var gpsOff = exifOff + (exifIfd.length ? ifdBytes(exifIfd.length) : 0);
+    var dataStart = gpsOff + (gpsIfd.length ? ifdBytes(gpsIfd.length) : 0);
+
+    // pointers into the sub-IFDs live in IFD0
+    var head = ifd0.slice();
+    if (exifIfd.length) head.push({ tag: TAG.EXIF_IFD, type: W.LONG, value: [exifOff] });
+    if (gpsIfd.length) head.push({ tag: TAG.GPS_IFD, type: W.LONG, value: [gpsOff] });
+    head.sort(function (a, b) { return a.tag - b.tag; });
+
+    var data = [];
+    var total = dataStart;
+    function reserve(bytes) {
+      var at = total;
+      total += bytes + (bytes % 2);
+      return at;
+    }
+
+    var buf = new Uint8Array(65000);
+    var view = new DataView(buf.buffer);
+    function u16(o, v) { view.setUint16(o, v, true); }
+    function u32(o, v) { view.setUint32(o, v, true); }
+
+    buf[0] = 0x49; buf[1] = 0x49;              // 'II'
+    u16(2, 42);
+    u32(4, ifd0Off);
+
+    function writeIFD(entries, offset) {
+      entries.sort(function (a, b) { return a.tag - b.tag; });
+      u16(offset, entries.length);
+      entries.forEach(function (e, i) {
+        var at = offset + 2 + i * 12;
+        var count = entryCount(e);
+        var bytes = WIDTH[e.type] * (e.type === W.RATIONAL ? count * 2 : count);
+        if (e.type === W.RATIONAL) bytes = count * 8;
+        u16(at, e.tag);
+        u16(at + 2, e.type);
+        u32(at + 4, count);
+        if (bytes <= 4) {
+          for (var b = 0; b < bytes; b++) {
+            if (e.type === W.SHORT) u16(at + 8 + b * 2, e.value[b]);
+            else buf[at + 8 + b] = e.value[b];
+          }
+          if (e.type === W.SHORT) u16(at + 8, e.value[0]);
+          if (e.type === W.LONG) u32(at + 8, e.value[0]);
+        } else {
+          var pos = reserve(bytes);
+          u32(at + 8, pos);
+          data.push({ at: pos, e: e });
+        }
+      });
+      u32(offset + 2 + entries.length * 12, 0);   // no next IFD
+    }
+
+    writeIFD(head, ifd0Off);
+    if (exifIfd.length) writeIFD(exifIfd, exifOff);
+    if (gpsIfd.length) writeIFD(gpsIfd, gpsOff);
+
+    data.forEach(function (d) {
+      var e = d.e, at = d.at;
+      if (e.type === W.RATIONAL) {
+        for (var i = 0; i < e.value.length; i += 2) {
+          u32(at + i * 4, e.value[i]);
+          u32(at + i * 4 + 4, e.value[i + 1]);
+        }
+      } else if (e.type === W.SHORT) {
+        for (var j = 0; j < e.value.length; j++) u16(at + j * 2, e.value[j]);
+      } else if (e.type === W.LONG) {
+        for (var k = 0; k < e.value.length; k++) u32(at + k * 4, e.value[k]);
+      } else {
+        for (var m = 0; m < e.value.length; m++) buf[at + m] = e.value[m];
+      }
+    });
+
+    return buf.subarray(0, total);
+  }
+
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
   var Exif = {
+    /**
+     * Return a copy of `jpeg` carrying an EXIF block built from `meta`
+     * (lat, lon, alt, heading, headingRef, hAcc, taken, device, speed).
+     * Falls back to the original blob if anything is off — metadata is never
+     * worth losing the photo over.
+     */
+    write: function (jpeg, meta) {
+      return jpeg.arrayBuffer().then(function (buf) {
+        var src = new Uint8Array(buf);
+        if (src[0] !== 0xff || src[1] !== 0xd8) return jpeg;      // not a JPEG
+
+        var ifd0 = [], exifIfd = [], gps = [];
+        var when = meta.taken ? new Date(meta.taken) : null;
+
+        if (meta.device) {
+          ifd0.push({ tag: TAG.MAKE, type: W.ASCII, value: ascii(String(meta.device).slice(0, 60)) });
+          ifd0.push({ tag: TAG.MODEL, type: W.ASCII, value: ascii(String(meta.model || meta.device).slice(0, 60)) });
+        }
+        ifd0.push({ tag: TAG.ORIENTATION, type: W.SHORT, value: [1] });   // already baked in
+        if (when) {
+          var stamp = when.getFullYear() + ':' + pad2(when.getMonth() + 1) + ':' + pad2(when.getDate()) +
+            ' ' + pad2(when.getHours()) + ':' + pad2(when.getMinutes()) + ':' + pad2(when.getSeconds());
+          ifd0.push({ tag: 0x0132, type: W.ASCII, value: ascii(stamp) });
+          exifIfd.push({ tag: TAG.DATE_ORIGINAL, type: W.ASCII, value: ascii(stamp) });
+          exifIfd.push({ tag: TAG.DATE_DIGITIZED, type: W.ASCII, value: ascii(stamp) });
+        }
+
+        if (typeof meta.lat === 'number' && typeof meta.lon === 'number') {
+          gps.push({ tag: 0, type: W.BYTE, value: [2, 3, 0, 0] });          // GPSVersionID
+          gps.push({ tag: GPS.LAT_REF, type: W.ASCII, value: ascii(meta.lat >= 0 ? 'N' : 'S') });
+          gps.push({ tag: GPS.LAT, type: W.RATIONAL, value: [].concat.apply([], toDMS(meta.lat)) });
+          gps.push({ tag: GPS.LON_REF, type: W.ASCII, value: ascii(meta.lon >= 0 ? 'E' : 'W') });
+          gps.push({ tag: GPS.LON, type: W.RATIONAL, value: [].concat.apply([], toDMS(meta.lon)) });
+        }
+        if (typeof meta.alt === 'number' && isFinite(meta.alt)) {
+          gps.push({ tag: GPS.ALT_REF, type: W.BYTE, value: [meta.alt < 0 ? 1 : 0] });
+          gps.push({ tag: GPS.ALT, type: W.RATIONAL, value: rational(meta.alt, 100) });
+        }
+        if (typeof meta.heading === 'number' && isFinite(meta.heading)) {
+          gps.push({ tag: GPS.IMG_DIR_REF, type: W.ASCII, value: ascii(meta.headingRef === 'T' ? 'T' : 'M') });
+          gps.push({ tag: GPS.IMG_DIR, type: W.RATIONAL, value: rational(meta.heading, 100) });
+        }
+        if (typeof meta.hAcc === 'number' && isFinite(meta.hAcc)) {
+          gps.push({ tag: GPS.H_ERROR, type: W.RATIONAL, value: rational(meta.hAcc, 100) });
+        }
+        if (typeof meta.speed === 'number' && isFinite(meta.speed)) {
+          gps.push({ tag: GPS.SPEED_REF, type: W.ASCII, value: ascii('K') });
+          gps.push({ tag: GPS.SPEED, type: W.RATIONAL, value: rational(meta.speed * 3.6, 100) });
+        }
+        if (when) {
+          gps.push({ tag: GPS.DATE, type: W.ASCII, value: ascii(
+            when.getUTCFullYear() + ':' + pad2(when.getUTCMonth() + 1) + ':' + pad2(when.getUTCDate())) });
+          gps.push({ tag: GPS.TIME, type: W.RATIONAL, value: [
+            when.getUTCHours(), 1, when.getUTCMinutes(), 1, when.getUTCSeconds(), 1] });
+        }
+
+        if (!gps.length && !exifIfd.length) return jpeg;
+
+        var tiff = buildTiff(ifd0, exifIfd, gps);
+        var payload = 6 + tiff.length;                        // "Exif\0\0" + TIFF
+        if (payload + 2 > 65535) return jpeg;
+
+        var out = new Uint8Array(src.length + 4 + payload);
+        var o = 0;
+        out[o++] = 0xff; out[o++] = 0xd8;                     // SOI
+        out[o++] = 0xff; out[o++] = 0xe1;                     // APP1
+        out[o++] = ((payload + 2) >> 8) & 0xff;
+        out[o++] = (payload + 2) & 0xff;
+        out[o++] = 0x45; out[o++] = 0x78; out[o++] = 0x69; out[o++] = 0x66; out[o++] = 0; out[o++] = 0;
+        out.set(tiff, o); o += tiff.length;
+        out.set(src.subarray(2), o);                          // the rest of the original
+        return new Blob([out], { type: 'image/jpeg' });
+      }).catch(function () {
+        return jpeg;
+      });
+    },
+
     /** Resolves with what could be read; never rejects on a malformed file. */
     read: function (blob) {
       return blob.slice(0, HEAD).arrayBuffer().then(function (buf) {

@@ -21,6 +21,12 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
 - **Portrait and landscape.** Turned sideways the shutter moves to a right-hand rail
   under your thumb, and the status chips go inline, so a short landscape viewport is
   not wasted.
+- **Photos carry their own metadata.** Canvas re-encoding strips EXIF, so the app
+  writes a fresh block back: position, altitude, the compass heading (flagged true
+  or magnetic), position accuracy and capture time. That block travels with the
+  JPEG into the ArcGIS attachment *and* onto the phone, so a photo saved out of the
+  queue can be dropped straight back in — or read by anything else that understands
+  EXIF.
 - **Keeps a copy on the phone.** Local copies stay for 48 hours after upload, and
   **Upload queue → Save all** hands the batch to the device in one go — the share
   sheet on iOS, where *Save N Images* puts them in Photos. A web app cannot write to
@@ -180,7 +186,7 @@ app.css         all styling
 js/config.js    defaults, field mapping, settings persistence
 js/store.js     IndexedDB — the photo queue and key/value store
 js/arcgis.js    auth, layer metadata, addFeatures + addAttachment, retry/backoff
-js/exif.js      reads position and heading out of a photo's own EXIF
+js/exif.js      reads and writes the EXIF block carrying position and heading
 js/report.js    problem reports → the ExoticCameraBugs table
 js/sound.js     synthesised UI sounds
 js/app.js       camera, compass maths, sync loop, UI wiring

@@ -508,10 +508,13 @@
     });
   }
 
+  function devicePlatform() {
+    var m = navigator.userAgent.match(/\((?:Linux; )?(?:U; )?([^;)]+)/);
+    return (m ? m[1] : 'web').trim();
+  }
+
   function deviceLabel() {
-    var ua = navigator.userAgent;
-    var m = ua.match(/\((?:Linux; )?(?:U; )?([^;)]+)/);
-    return ('Exotic Camera / ' + (m ? m[1] : 'web')).slice(0, 50);
+    return ('Exotic Camera / ' + devicePlatform()).slice(0, 50);
   }
 
   function capture() {
@@ -587,6 +590,8 @@
       heading: state.heading === null ? null : Math.round(state.heading * 10) / 10,
       headingSource: state.headingSource,
       device: deviceLabel(),
+      make: 'Exotic Camera',
+      model: devicePlatform(),
       // pin the destination now: switching layers later must not redirect
       // photos that were already taken
       serviceUrl: Config.get().serviceUrl,
@@ -599,8 +604,13 @@
       toast('Saved without a heading — compass not available', 'warn', 4000);
     }
     Report.note('captured', { heading: item.heading, acc: Math.round(item.hAcc || 0), layer: item.layerName });
-    return Store.add(item).then(function () {
-      if (Config.get().saveToDevice) saveCopy(img.blob, photoName(item));
+    var stampedBlob = null;
+    return Exif.write(img.blob, exifMeta(item)).then(function (stamped) {
+      stampedBlob = stamped;                  // Store.add moves the bytes out of `item`
+      item.blob = stamped;
+      return Store.add(item);
+    }).then(function () {
+      if (Config.get().saveToDevice) saveCopy(stampedBlob, photoName(item));
       $('last-shot').style.backgroundImage = 'url(' + img.thumb + ')';
       $('last-shot').classList.add('pop');
       setTimeout(function () { $('last-shot').classList.remove('pop'); }, 400);
@@ -613,6 +623,19 @@
   }
 
   /* ── keeping a copy on the phone ──────────────────────────────── */
+
+  /** The heading the app records is magnetic unless it came from GPS course. */
+  function exifMeta(item) {
+    return {
+      lat: item.lat, lon: item.lon, alt: item.alt,
+      heading: item.heading,
+      headingRef: (item.headingSource === 'gps' || item.headingSource === 'exif') ? 'T' : 'M',
+      hAcc: item.hAcc, speed: item.speed,
+      taken: item.createdAt,
+      device: item.make || 'Exotic Camera',
+      model: item.model || item.device
+    };
+  }
 
   function photoName(item) {
     var d = new Date(item.createdAt);
@@ -759,6 +782,8 @@
             heading: ex.heading === null ? null : Math.round(ex.heading * 10) / 10,
             headingSource: ex.heading === null ? null : ('exif' + (ex.headingRef === 'M' ? '-mag' : '')),
             device: ('Imported · ' + (ex.camera || 'unknown camera')).slice(0, 50),
+            make: ex.make || 'Exotic Camera',
+            model: ex.model || (ex.camera || 'imported'),
             source: 'import',
             serviceUrl: Config.get().serviceUrl,
             layerId: Config.get().layerId,
@@ -766,7 +791,10 @@
             state: 'pending'
           };
           item.filename = photoName(item);
-          return Store.add(item).then(function () {
+          return Exif.write(img.blob, exifMeta(item)).then(function (stamped) {
+            item.blob = stamped;
+            return Store.add(item);
+          }).then(function () {
             return { added: true, heading: item.heading };
           });
         });
@@ -815,6 +843,11 @@
 
   /* ─────────────────────────── sync engine ────────────────────────── */
 
+  function sheetOpen(id) {
+    var el = $(id);
+    return el && !el.classList.contains('hidden');
+  }
+
   function refreshCounts() {
     return Store.counts().then(function (c) {
       state.counts = c;
@@ -824,6 +857,8 @@
       $('mi-queue-sub').textContent = c.outstanding
         ? c.outstanding + ' waiting' + (c.error ? ', ' + c.error + ' failed' : '')
         : 'nothing pending';
+      // watching the queue should mean watching it change, not tapping away and back
+      if (sheetOpen('queue-panel')) renderQueue();
       return c;
     });
   }
