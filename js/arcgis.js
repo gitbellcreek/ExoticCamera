@@ -317,8 +317,10 @@
         if (!item.blob) return null;                       // point-only record
         return Arc.addAttachment(oid, item.blob, 'photo_' + item.id.slice(0, 8) + '.jpg');
       }).then(function (aid) {
+        // the photo is deliberately kept for a while after upload: it is the only
+        // local copy, and the queue view can still hand it to the device
         return g.Store.patch(item.id, {
-          state: 'sent', attachmentId: aid, sentAt: Date.now(), lastError: null, blob: null
+          state: 'sent', attachmentId: aid, sentAt: Date.now(), lastError: null
         });
       });
     },

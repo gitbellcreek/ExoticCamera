@@ -144,6 +144,20 @@
     renderHeading();
   }
 
+  var compassArmed = false, compassPending = null, gotOrientation = false;
+  var headingWaiters = [];
+
+  /** Resolve once the magnetometer produces a sample, or give up after `ms`. */
+  function firstHeading(ms) {
+    if (gotOrientation || !listening) return Promise.resolve();
+    return new Promise(function (res) {
+      var done = false;
+      var fin = function () { if (!done) { done = true; res(); } };
+      headingWaiters.push(fin);
+      setTimeout(fin, ms);
+    });
+  }
+
   function onOrientation(e) {
     var alpha = e.alpha;
     if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
@@ -153,24 +167,66 @@
     }
     if (alpha === null) return;
     var az = cameraAzimuth(alpha, e.beta || 0, e.gamma || 0);
-    if (az !== null) pushHeading(az, 'sensor', e.webkitCompassAccuracy);
+    if (az === null) return;
+    gotOrientation = true;
+    pushHeading(az, 'sensor', e.webkitCompassAccuracy);
+    while (headingWaiters.length) headingWaiters.pop()();
+  }
+
+  var listening = false;
+  function listenOrientation() {
+    if (listening) return;
+    listening = true;
+    window.addEventListener('deviceorientationabsolute', onOrientation, true);
+    window.addEventListener('deviceorientation', onOrientation, true);
+    // Granted but silent usually means Motion & Orientation Access is off in Safari
+    setTimeout(function () {
+      if (!gotOrientation) {
+        toast('No compass data — check Settings → Safari → Motion & Orientation Access', 'warn', 7000);
+      }
+    }, 5000);
+  }
+
+  function needsGesture() {
+    var DOE = window.DeviceOrientationEvent;
+    return !!DOE && typeof DOE.requestPermission === 'function';
   }
 
   function startCompass() {
     var DOE = window.DeviceOrientationEvent;
     if (!DOE) { toast('No compass on this device', 'warn'); return Promise.resolve(); }
-    var go = function () {
-      window.addEventListener('deviceorientationabsolute', onOrientation, true);
-      window.addEventListener('deviceorientation', onOrientation, true);
+    if (!needsGesture()) { listenOrientation(); return Promise.resolve(); }
+    if (compassPending) return compassPending;
+    compassPending = DOE.requestPermission().then(function (r) {
+      compassPending = null;
+      if (r === 'granted') listenOrientation();
+      else toast('Compass blocked — tap the compass to ask again', 'warn', 5000);
+    }).catch(function () {
+      compassPending = null;             // needs a fresh gesture; the arming below retries
+    });
+    return compassPending;
+  }
+
+  /**
+   * iOS only hands out compass data after asking, and only from a user gesture.
+   * Rather than making that a chore, fire the request on the first touch anywhere
+   * in the app — so the compass comes up on the way to the first photo.
+   */
+  function armCompass() {
+    if (compassArmed || !needsGesture()) return;
+    compassArmed = true;
+    var fire = function () {
+      unarm();                    // one shot: after this the compass tap is the retry
+      startCompass();
     };
-    if (typeof DOE.requestPermission === 'function') {
-      return DOE.requestPermission().then(function (r) {
-        if (r === 'granted') go();
-        else toast('Compass permission denied', 'warn');
-      }).catch(function () { /* not fatal — GPS course is the fallback */ });
-    }
-    go();
-    return Promise.resolve();
+    var unarm = function () {
+      document.removeEventListener('pointerdown', fire, true);
+      document.removeEventListener('touchend', fire, true);
+      document.removeEventListener('click', fire, true);
+    };
+    document.addEventListener('pointerdown', fire, true);
+    document.addEventListener('touchend', fire, true);
+    document.addEventListener('click', fire, true);
   }
 
   /* ───────────────────────────── location ─────────────────────────── */
@@ -262,6 +318,16 @@
       return Promise.resolve();
     }
     state.busy = true;
+    // The first shot often lands while the compass permission dialog is still up.
+    // Wait for the answer, then briefly for the first sample, so shot one is not
+    // silently headingless.
+    var settle = compassPending || Promise.resolve();
+    return settle
+      .then(function () { return state.heading === null ? firstHeading(1500) : null; })
+      .then(doCapture);
+  }
+
+  function doCapture() {
     Sound.shutter();
     buzz(12);
     flashScreen();
@@ -306,7 +372,11 @@
       device: deviceLabel(),
       state: 'pending'
     };
+    if (item.heading === null || item.heading === undefined) {
+      toast('Saved without a heading — compass not available', 'warn', 4000);
+    }
     return Store.add(item).then(function () {
+      if (Config.get().saveToDevice) saveCopy(img.blob, photoName(item));
       $('last-shot').style.backgroundImage = 'url(' + img.thumb + ')';
       $('last-shot').classList.add('pop');
       setTimeout(function () { $('last-shot').classList.remove('pop'); }, 400);
@@ -315,6 +385,59 @@
     }).then(function () {
       if (state.online && Config.get().autoSync) sync();
       else toast('Saved offline — will upload when back online', 'warn');
+    });
+  }
+
+  /* ── keeping a copy on the phone ──────────────────────────────── */
+
+  function photoName(item) {
+    var d = new Date(item.createdAt);
+    var p = function (n, w) { return String(n).padStart(w || 2, '0'); };
+    return 'exoticcam_' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' +
+      p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) +
+      (item.heading === null || item.heading === undefined ? '' : '_hdg' + p(Math.round(item.heading), 3)) + '.jpg';
+  }
+
+  /**
+   * Hand a photo to the phone. On iOS there is no way for a web app to write to
+   * the camera roll directly, so we open the share sheet — "Save Image" puts it
+   * in Photos. Everywhere else a plain download lands in the gallery folder.
+   */
+  function saveCopy(blob, name) {
+    if (!blob) return Promise.resolve(false);
+    var file;
+    try { file = new File([blob], name, { type: 'image/jpeg' }); } catch (e) { file = null; }
+
+    if (file && isIOS() && navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file] }).then(function () { return true; })
+        .catch(function (e) {
+          if (e && e.name === 'AbortError') return false;      // user closed the sheet
+          return downloadBlob(blob, name);
+        });
+    }
+    return Promise.resolve(downloadBlob(blob, name));
+  }
+
+  function downloadBlob(blob, name) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 15000);
+    return true;
+  }
+
+  /** Drop the local JPEG once it has been uploaded and had its keep time. */
+  function pruneLocalCopies() {
+    var keep = (Config.get().keepHours || 48) * 3600000;
+    return Store.all().then(function (rows) {
+      var stale = rows.filter(function (r) {
+        return r.state === 'sent' && r.blob && r.sentAt && Date.now() - r.sentAt > keep;
+      });
+      return Promise.all(stale.map(function (r) { return Store.patch(r.id, { blob: null }); }));
     });
   }
 
@@ -432,7 +555,7 @@
   }
 
   function closeSheets() {
-    ['menu', 'queue-panel', 'settings-panel', 'about-panel', 'signin-panel'].forEach(function (id) {
+    ['menu', 'queue-panel', 'settings-panel', 'about-panel', 'signin-panel', 'install-panel'].forEach(function (id) {
       var el = $(id);
       if (!el || el.classList.contains('hidden')) return;
       el.classList.remove('open');
@@ -456,8 +579,19 @@
           '<span>' + (r.heading === null || r.heading === undefined ? 'no heading' : Math.round(r.heading) + '°') +
           ' · ' + (r.hAcc ? '±' + Math.round(r.hAcc) + 'm' : 'no acc') + '</span>' +
           '<span class="qsub">' + sub + '</span></div>' +
+          (r.blob ? '<button class="qsave" data-id="' + r.id + '" aria-label="Save to device">⤓</button>' : '') +
           '<button class="qdel" data-id="' + r.id + '" aria-label="Delete">✕</button></div>';
       }).join('');
+      Array.prototype.forEach.call(list.querySelectorAll('.qsave'), function (b) {
+        b.addEventListener('click', function () {
+          Store.item(b.dataset.id).then(function (r) {
+            if (!r || !r.blob) return toast('Local copy no longer on the device', 'warn');
+            return saveCopy(r.blob, photoName(r)).then(function (done) {
+              if (done) { Sound.tick(); toast('Saved', 'ok'); }
+            });
+          });
+        });
+      });
       Array.prototype.forEach.call(list.querySelectorAll('.qdel'), function (b) {
         b.addEventListener('click', function () {
           Store.remove(b.dataset.id).then(renderQueue).then(refreshCounts);
@@ -475,6 +609,7 @@
     $('s-maxdim').value = c.maxDim;
     $('s-quality').value = c.quality;
     $('s-quality-out').textContent = c.quality;
+    $('s-savedevice').checked = c.saveToDevice;
     $('s-sound').checked = c.sound;
     $('s-haptics').checked = c.haptics;
     $('s-autosync').checked = c.autoSync;
@@ -493,6 +628,7 @@
       portal: $('s-portal').value.trim() || 'https://www.arcgis.com',
       maxDim: parseInt($('s-maxdim').value, 10) || 1600,
       quality: parseFloat($('s-quality').value) || 0.8,
+      saveToDevice: $('s-savedevice').checked,
       sound: $('s-sound').checked,
       haptics: $('s-haptics').checked,
       autoSync: $('s-autosync').checked,
@@ -541,6 +677,43 @@
       });
       return reg;
     }).catch(function () { /* app still works, just without offline caching */ });
+  }
+
+  /* ── installing to the Home Screen ────────────────────────────── */
+
+  var deferredPrompt = null;
+
+  function isStandalone() {
+    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) ||
+           navigator.standalone === true;
+  }
+
+  function isIOS() {
+    return /iP(hone|ad|od)/.test(navigator.platform || '') ||
+           (/Mac/.test(navigator.userAgent) && 'ontouchend' in document);
+  }
+
+  function offerInstall() {
+    if (deferredPrompt) {                       // Chrome/Edge can do it in one tap
+      var p = deferredPrompt;
+      deferredPrompt = null;
+      closeSheets();
+      p.prompt();
+      return p.userChoice.then(function (c) {
+        if (c && c.outcome === 'accepted') { Sound.sent(); toast('Installed', 'ok'); }
+      }).catch(function () { /* dismissed */ });
+    }
+    // Safari has no install API — show it where the button lives
+    $('steps-ios').classList.toggle('hidden', !isIOS());
+    $('steps-other').classList.toggle('hidden', isIOS());
+    var warn = $('install-queue-warn');
+    warn.classList.toggle('hidden', !state.counts.outstanding);
+    if (state.counts.outstanding) {
+      warn.textContent = state.counts.outstanding + ' photo(s) still waiting to upload. ' +
+        'Finish them here first — the installed app will not see them.';
+    }
+    openSheet('install-panel');
+    return Promise.resolve();
   }
 
   function reinstall() {
@@ -614,6 +787,8 @@
     $('mi-queue').addEventListener('click', function () { renderQueue().then(function () { openSheet('queue-panel'); }); });
     $('mi-sync').addEventListener('click', function () { closeSheets(); sync(true); });
     $('mi-settings').addEventListener('click', function () { loadSettingsForm(); openSheet('settings-panel'); });
+    $('mi-install').addEventListener('click', offerInstall);
+    $('i-close').addEventListener('click', closeSheets);
     $('mi-reinstall').addEventListener('click', reinstall);
     $('mi-about').addEventListener('click', function () {
       $('about-body').innerHTML =
@@ -698,6 +873,15 @@
     });
     window.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeSheets(); });
 
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferredPrompt = e;
+    });
+    window.addEventListener('appinstalled', function () {
+      deferredPrompt = null;
+      Store.set('installHinted', true);
+    });
+
     window.addEventListener('online', function () { setNet(true); });
     window.addEventListener('offline', function () { setNet(false); });
     document.addEventListener('visibilitychange', function () {
@@ -736,18 +920,33 @@
       scheduleSync();
       registerSW();
       startGPS();
-      // iOS needs a gesture for the compass; on Android this just works
-      if (!window.DeviceOrientationEvent || typeof window.DeviceOrientationEvent.requestPermission !== 'function') {
-        startCompass();
-      }
+      if (needsGesture()) armCompass();      // iOS: ask on the first touch, wherever it lands
+      else startCompass();                   // everywhere else it just works
       return startCamera();
     }).then(function () {
       return Store.all();
     }).then(function (rows) {
       if (rows.length && rows[0].thumb) $('last-shot').style.backgroundImage = 'url(' + rows[0].thumb + ')';
       if (state.online && state.counts.outstanding && Config.get().autoSync) sync();
+      return pruneLocalCopies().then(maybeHintInstall);
     }).catch(function (e) {
       toast('Startup problem: ' + e.message, 'bad', 5000);
+    });
+  }
+
+  /** Mention the Home Screen once — the browser bar is the first thing you notice. */
+  function maybeHintInstall() {
+    if (isStandalone()) {
+      $('mi-install').classList.add('hidden');
+      return Promise.resolve();
+    }
+    return Store.get('installHinted').then(function (seen) {
+      if (seen) return null;
+      return Store.set('installHinted', true).then(function () {
+        setTimeout(function () {
+          toast('Menu → Add to Home Screen to lose the browser bar', 'ok', 6000);
+        }, 2500);
+      });
     });
   }
 

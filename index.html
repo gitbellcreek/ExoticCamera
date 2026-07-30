@@ -80,6 +80,7 @@
       <button class="item" id="mi-queue"><span class="i">⇪</span><span>Upload queue<em id="mi-queue-sub">nothing pending</em></span></button>
       <button class="item" id="mi-sync"><span class="i">↻</span><span>Sync now<em>push queued photos</em></span></button>
       <button class="item" id="mi-settings"><span class="i">⚙</span><span>Settings<em>layer, quality, sounds</em></span></button>
+      <button class="item" id="mi-install"><span class="i">⤒</span><span>Add to Home Screen<em id="mi-install-sub">run full screen, without the browser bar</em></span></button>
       <button class="item" id="mi-reinstall"><span class="i">⤓</span><span>Reinstall app<em>fetch latest code from GitHub Pages</em></span></button>
       <button class="item" id="mi-about"><span class="i">ⓘ</span><span>About<em id="mi-about-sub">v0.0.0</em></span></button>
     </nav>
@@ -121,6 +122,10 @@
       <input type="range" id="s-quality" min="0.4" max="0.95" step="0.05">
       <output id="s-quality-out"></output></label>
 
+    <label class="fld chk"><input type="checkbox" id="s-savedevice"><span>Save a copy to the phone</span></label>
+    <p class="hint">On iPhone this opens the share sheet after each shot — tap
+      <b>Save Image</b> to put it in Photos. A web app cannot write to the camera
+      roll on its own. Elsewhere the photo just downloads.</p>
     <label class="fld chk"><input type="checkbox" id="s-sound"><span>Sounds</span></label>
     <label class="fld chk"><input type="checkbox" id="s-haptics"><span>Vibration</span></label>
     <label class="fld chk"><input type="checkbox" id="s-autosync"><span>Auto-upload when online</span></label>
@@ -154,6 +159,33 @@
     <h2>Exotic Camera</h2>
     <p class="hint" id="about-body"></p>
     <div class="row"><button class="btn ghost" id="a-close">Close</button></div>
+  </div>
+</div>
+
+<!-- ── install panel ─────────────────────────────────────────── -->
+<div id="install-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Add to Home Screen">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Run it full screen</h2>
+    <p class="hint">Safari always keeps its address bar, and in landscape it eats a
+      good part of a short screen. Installing the app to the Home Screen drops the
+      browser chrome entirely — same app, same offline queue, no bar.</p>
+
+    <ol class="steps" id="steps-ios">
+      <li>Tap the <b>Share</b> button in Safari — the square with an arrow coming out of it.</li>
+      <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+      <li>Tap <b>Add</b>, then open <b>Exotic Camera</b> from your Home Screen.</li>
+    </ol>
+    <ol class="steps hidden" id="steps-other">
+      <li>Open your browser's menu (⋮).</li>
+      <li>Choose <b>Install app</b> or <b>Add to Home screen</b>.</li>
+    </ol>
+
+    <p class="hint">iOS gives the installed app its own storage, separate from
+      Safari's: it starts with an empty queue and asks you to sign in once. Let the
+      queue finish uploading in Safari before you switch over.</p>
+    <p class="hint bad-text hidden" id="install-queue-warn"></p>
+    <div class="row"><button class="btn ghost" id="i-close">Close</button></div>
   </div>
 </div>
 

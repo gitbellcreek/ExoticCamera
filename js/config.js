@@ -15,6 +15,8 @@
 
     maxDim: 1600,                             // long edge of the uploaded JPEG
     quality: 0.8,
+    saveToDevice: true,                       // also hand each photo to the phone
+    keepHours: 48,                            // how long the local JPEG is kept after upload
     sound: true,
     haptics: true,
     autoSync: true,

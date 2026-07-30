@@ -13,6 +13,18 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
   tilt-compensated, so it reads the direction the *lens* points while you hold the
   phone upright — not the direction the top of the phone points. Falls back to GPS
   course over ground on devices with no magnetometer.
+- **The compass starts itself.** iOS only hands out orientation data after a
+  permission prompt raised from a user gesture, so the app asks on the *first touch
+  anywhere* — no one has to know to tap the dial. If the first touch is the shutter,
+  the capture waits for the answer and the first sample, so photo one still carries a
+  heading. A photo saved without one says so.
+- **Portrait and landscape.** Turned sideways the shutter moves to a right-hand rail
+  under your thumb, and the status chips go inline, so a short landscape viewport is
+  not wasted.
+- **Keeps a copy on the phone.** Each shot is also handed to the device — the share
+  sheet on iOS (tap *Save Image* for Photos; a web app cannot write to the camera roll
+  by itself), a plain download elsewhere. Local copies stay in the queue for 48 hours
+  after upload so you can still save them from the queue view.
 - **Works offline.** Photos go into IndexedDB on the device and upload themselves
   when the connection comes back — including via Background Sync while the app is
   closed, on browsers that support it.
@@ -25,6 +37,10 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
   synthesised in about 4 KB of WebAudio — there are no sound files to download.
 - **Reinstall button** in the menu: unregisters the service worker, drops every
   cache, and reloads from GitHub Pages. Queued photos and settings survive it.
+- **Add to Home Screen** in the menu, with the steps for whichever browser is
+  running. Installed, it loses the browser address bar — the only way to go truly
+  full screen in Safari. Note that iOS gives the installed app its own storage, so
+  drain the queue in Safari before switching.
 
 ## Data written
 
@@ -49,6 +65,15 @@ schema** shows what the app resolved against the live layer. Point a different
 service URL at the app and it re-detects — nothing here is hard-wired.
 
 Geometry is sent as WGS84 (`wkid: 4326`); the service reprojects to Web Mercator.
+
+## Working on it
+
+There are no unit tests; the checks that matter run against a browser and the live
+service, driven by Playwright from `node`. If you write your own, note the rule the
+existing ones follow: **a test may only delete features it created itself.** They
+snapshot the layer's OBJECTIDs at start and delete the difference. A `where=1=1`
+delete on this layer destroys real field data — with no undo, since the service has
+neither sync nor archiving enabled.
 
 ## Signing in
 

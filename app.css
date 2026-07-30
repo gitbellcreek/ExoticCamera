@@ -157,7 +157,7 @@ body.syncing #topbar::after {
 }
 .sheet.open { opacity: 1; }
 .sheet-inner {
-  width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto;
+  width: 100%; max-width: 560px; max-height: 88vh; max-height: 88dvh; overflow-y: auto;
   background: var(--panel); border: 1px solid var(--line); border-bottom: 0;
   border-radius: 18px 18px 0 0; padding: 8px 18px calc(var(--safe-b) + 20px);
   transform: translateY(14px); transition: transform .22s ease;
@@ -208,6 +208,8 @@ body.syncing #topbar::after {
 .fld-details { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 12px 0; }
 .fld-details summary { cursor: pointer; font-weight: 600; font-size: 14px; }
 .hint { font-size: 12px; color: var(--dim); line-height: 1.5; }
+.steps { margin: 12px 0; padding-left: 22px; font-size: 13px; line-height: 1.6; color: var(--txt); }
+.steps li { margin-bottom: 8px; }
 
 /* ── queue list ─────────────────────────────────────────────── */
 .queue-list { display: flex; flex-direction: column; gap: 8px; }
@@ -223,7 +225,34 @@ body.syncing #topbar::after {
 .qmeta b { display: block; color: var(--txt); font-size: 13px; }
 .qmeta span { display: block; }
 .qsub { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qdel { border: 0; background: none; color: var(--dim); font-size: 16px; padding: 8px; }
+.qdel, .qsave { border: 0; background: none; color: var(--dim); font-size: 16px; padding: 8px; }
+.qsave { color: var(--txt); }
+
+/* ── landscape ──────────────────────────────────────────────
+   Short and wide: move the shutter to a rail on the right so the
+   controls never fight the browser bar for vertical space. */
+@media (orientation: landscape) and (max-height: 560px) {
+  #controls {
+    top: 0; bottom: 0; left: auto; right: 0;
+    width: 92px; flex-direction: column-reverse;
+    padding: 10px 10px 10px 4px;
+    background: linear-gradient(90deg, #0000, #000a 40%, #000d);
+  }
+  #shutter { width: 62px; height: 62px; }
+  #shutter .core { inset: 6px; }
+  .thumb, .round { width: 42px; height: 42px; font-size: 17px; border-radius: 11px; }
+  .round { border-radius: 50%; }
+
+  #topbar { right: 92px; padding-top: calc(var(--safe-t) + 6px); gap: 8px; }
+  #compass { width: 84px; height: 84px; }
+  #heading-read { font-size: 14px; }
+  #heading-card { font-size: 8px; margin-top: 2px; }
+  #status { flex-direction: row; flex-wrap: wrap; gap: 5px; }
+  .chip { padding: 4px 8px; font-size: 11px; }
+
+  #toasts { bottom: calc(var(--safe-b) + 10px); right: 100px; left: 8px; padding: 0; }
+  .sheet-inner { max-height: 92vh; max-height: 92dvh; }
+}
 
 @media (min-width: 700px) {
   .sheet { align-items: center; }
