@@ -33,7 +33,11 @@ jobs:
           sed -i "s/__BUILD__/$BUILD/g" sw.js js/config.js
           echo "Built $BUILD"
 
+      # enablement turns Pages on for the repo on the first run, so no manual
+      # trip to Settings → Pages is needed
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: .
