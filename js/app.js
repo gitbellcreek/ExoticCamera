@@ -44,6 +44,12 @@
     }, ms || 2600);
   }
 
+  /** Server-supplied text (error messages, field names) lands in innerHTML. */
+  function esc(v) {
+    return String(v === null || v === undefined ? '' : v)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   function buzz(pattern) {
     if (!Config.get().haptics || !navigator.vibrate) return;
     try { navigator.vibrate(pattern); } catch (e) { /* not fatal */ }
@@ -441,12 +447,12 @@
       list.innerHTML = rows.map(function (r) {
         var when = new Date(r.createdAt).toLocaleString();
         var sub = r.state === 'sent' ? 'uploaded · OBJECTID ' + (r.objectId || '?')
-          : r.state === 'error' ? (r.lastError || 'failed')
+          : r.state === 'error' ? esc(r.lastError || 'failed')
           : r.state === 'uploading' ? 'uploading…'
-          : r.attempts ? 'retry ' + r.attempts + (r.lastError ? ' · ' + r.lastError : '') : 'waiting';
+          : r.attempts ? 'retry ' + r.attempts + (r.lastError ? ' · ' + esc(r.lastError) : '') : 'waiting';
         return '<div class="qrow ' + r.state + '">' +
           '<div class="qthumb" style="background-image:url(' + (r.thumb || '') + ')"></div>' +
-          '<div class="qmeta"><b>' + when + '</b>' +
+          '<div class="qmeta"><b>' + esc(when) + '</b>' +
           '<span>' + (r.heading === null || r.heading === undefined ? 'no heading' : Math.round(r.heading) + '°') +
           ' · ' + (r.hAcc ? '±' + Math.round(r.hAcc) + 'm' : 'no acc') + '</span>' +
           '<span class="qsub">' + sub + '</span></div>' +
@@ -611,7 +617,7 @@
     $('mi-reinstall').addEventListener('click', reinstall);
     $('mi-about').addEventListener('click', function () {
       $('about-body').innerHTML =
-        'Build <b>' + Config.BUILD + '</b><br>Layer: <code>' + Config.layerUrl() + '</code><br>' +
+        'Build <b>' + esc(Config.BUILD) + '</b><br>Layer: <code>' + esc(Config.layerUrl()) + '</code><br>' +
         'Photos are queued on the device and uploaded as points with an attached JPEG.<br>' +
         'Heading comes from the magnetometer (tilt compensated), falling back to GPS course.';
       openSheet('about-panel');
@@ -641,11 +647,11 @@
         return Arc.layerMeta(true);
       }).then(function (meta) {
         var map = Arc.resolveFields(meta);
-        $('s-schema').innerHTML = '<b>' + meta.name + '</b> — attachments ' +
+        $('s-schema').innerHTML = '<b>' + esc(meta.name) + '</b> — attachments ' +
           (meta.hasAttachments ? 'on' : '<span class="bad-text">off</span>') + '<br>' +
-          Object.keys(map).map(function (k) { return k + ' → <code>' + map[k].name + '</code>'; }).join('<br>');
+          Object.keys(map).map(function (k) { return k + ' → <code>' + esc(map[k].name) + '</code>'; }).join('<br>');
       }).catch(function (e) {
-        $('s-schema').innerHTML = '<span class="bad-text">' + e.message + '</span>';
+        $('s-schema').innerHTML = '<span class="bad-text">' + esc(e.message) + '</span>';
       });
     });
 
