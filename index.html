@@ -77,11 +77,13 @@
     </section>
 
     <nav class="menu-list">
+      <button class="item" id="mi-layer"><span class="i">▤</span><span>Layer<em id="mi-layer-sub">Central</em></span></button>
       <button class="item" id="mi-queue"><span class="i">⇪</span><span>Upload queue<em id="mi-queue-sub">nothing pending</em></span></button>
       <button class="item" id="mi-sync"><span class="i">↻</span><span>Sync now<em>push queued photos</em></span></button>
       <button class="item" id="mi-settings"><span class="i">⚙</span><span>Settings<em>layer, quality, sounds</em></span></button>
       <button class="item" id="mi-install"><span class="i">⤒</span><span>Add to Home Screen<em id="mi-install-sub">run full screen, without the browser bar</em></span></button>
       <button class="item" id="mi-reinstall"><span class="i">⤓</span><span>Reinstall app<em>fetch latest code from GitHub Pages</em></span></button>
+      <button class="item" id="mi-bug"><span class="i">☍</span><span>Report a problem<em>send a diagnostic to the team</em></span></button>
       <button class="item" id="mi-about"><span class="i">ⓘ</span><span>About<em id="mi-about-sub">v0.0.0</em></span></button>
     </nav>
   </div>
@@ -95,8 +97,10 @@
     <div id="queue-list" class="queue-list"></div>
     <div class="row">
       <button class="btn" id="q-retry">Retry all</button>
+      <button class="btn ghost" id="q-save-all">Save to phone</button>
       <button class="btn ghost" id="q-clear-done">Clear sent</button>
     </div>
+    <p class="hint" id="q-save-hint"></p>
   </div>
 </div>
 
@@ -106,6 +110,8 @@
     <div class="sheet-grab"></div>
     <h2>Settings</h2>
 
+    <div class="fld"><span>Layer</span>
+      <div class="seg" id="s-presets"></div></div>
     <label class="fld"><span>Feature service URL</span>
       <input type="url" id="s-url" inputmode="url" spellcheck="false" autocapitalize="off"></label>
     <label class="fld"><span>Layer id</span>
@@ -122,13 +128,16 @@
       <input type="range" id="s-quality" min="0.4" max="0.95" step="0.05">
       <output id="s-quality-out"></output></label>
 
-    <label class="fld chk"><input type="checkbox" id="s-savedevice"><span>Save a copy to the phone</span></label>
-    <p class="hint">On iPhone this opens the share sheet after each shot — tap
-      <b>Save Image</b> to put it in Photos. A web app cannot write to the camera
-      roll on its own. Elsewhere the photo just downloads.</p>
+    <label class="fld chk"><input type="checkbox" id="s-savedevice"><span>Share each photo as it is taken</span></label>
+    <p class="hint">Off by default: on iPhone this opens the share sheet after
+      <em>every</em> shot, which gets in the way. Leave it off and use
+      <b>Upload queue → Save to phone</b> to save the day's photos in one go — iOS
+      offers "Save N Images" for the whole batch. A web app cannot write to the
+      camera roll by itself; the share sheet is the only route into Photos.</p>
     <label class="fld chk"><input type="checkbox" id="s-sound"><span>Sounds</span></label>
     <label class="fld chk"><input type="checkbox" id="s-haptics"><span>Vibration</span></label>
     <label class="fld chk"><input type="checkbox" id="s-autosync"><span>Auto-upload when online</span></label>
+    <label class="fld chk"><input type="checkbox" id="s-report"><span>Report problems automatically</span></label>
 
     <details class="fld-details">
       <summary>Field mapping</summary>
@@ -159,6 +168,36 @@
     <h2>Exotic Camera</h2>
     <p class="hint" id="about-body"></p>
     <div class="row"><button class="btn ghost" id="a-close">Close</button></div>
+  </div>
+</div>
+
+<!-- ── layer picker ──────────────────────────────────────────── -->
+<div id="layer-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Layer">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Where photos go</h2>
+    <div class="menu-list" id="layer-list"></div>
+    <p class="hint">Photos already queued keep going to the layer they were taken
+      for — switching only affects the next shot.</p>
+    <div class="row"><button class="btn ghost" id="l-close">Close</button></div>
+  </div>
+</div>
+
+<!-- ── problem report ────────────────────────────────────────── -->
+<div id="bug-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Report a problem">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Report a problem</h2>
+    <p class="hint">Sends a row to the ExoticCameraBugs table: what went wrong, the
+      app build, which layer you are on, the queue state, and the last few things
+      the app did. No photos are sent.</p>
+    <label class="fld"><span>What happened?</span>
+      <input type="text" id="bug-note" placeholder="optional — e.g. upload failed after signing in"></label>
+    <div id="bug-preview" class="hint"></div>
+    <div class="row">
+      <button class="btn" id="bug-send">Send report</button>
+      <button class="btn ghost" id="bug-close">Close</button>
+    </div>
   </div>
 </div>
 
@@ -222,5 +261,6 @@
 <script src="js/config.js"></script>
 <script src="js/store.js"></script>
 <script src="js/arcgis.js"></script>
+<script src="js/report.js"></script>
 <script src="js/sound.js"></script>
 <script src="js/app.js"></script>

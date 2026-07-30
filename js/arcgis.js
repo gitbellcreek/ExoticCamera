@@ -8,6 +8,19 @@
   var META_KEY = 'layerMeta';
   var META_TTL = 7 * 24 * 3600 * 1000;
 
+  /* Anything can end up in a catch: a DOMException, a string, even null from a
+     rejected IndexedDB request. Normalise before touching properties. */
+  function asError(e) {
+    if (e instanceof Error) return e;
+    if (e && typeof e === 'object') {
+      var w = new Error(e.message || e.name || 'Unexpected error');
+      if (e.needAuth) w.needAuth = true;
+      if (e.retryable) w.retryable = true;
+      return w;
+    }
+    return new Error(e ? String(e) : 'Unexpected error');
+  }
+
   function NeedAuth(msg) { var e = new Error(msg || 'Sign in required'); e.needAuth = true; return e; }
   function Retryable(msg) { var e = new Error(msg); e.retryable = true; return e; }
 
@@ -94,6 +107,7 @@
   }
 
   var Arc = {
+    asError: asError,
     NeedAuth: NeedAuth,
     getAuth: getAuth,
     token: token,
@@ -185,8 +199,8 @@
 
     /* ─────────────────────── layer metadata ─────────────────── */
 
-    layerMeta: function (force) {
-      var url = g.Config.layerUrl();
+    layerMeta: function (force, layerUrl) {
+      var url = layerUrl || g.Config.layerUrl();
       var key = META_KEY + ':' + url;
       return g.Store.get(key).then(function (cached) {
         if (!force && cached && Date.now() - cached.at < META_TTL) return cached.meta;
@@ -216,8 +230,9 @@
         if (explicit === '-') return;                                  // explicitly disabled
         if (explicit) {
           var f = byLower[explicit.toLowerCase()];
-          if (f) map[key] = f;
-          return;
+          if (f) { map[key] = f; return; }
+          // the override names a field this layer doesn't have — fall through and
+          // auto-detect, so switching layers doesn't silently drop values
         }
         for (var i = 0; i < cand[key].length; i++) {
           var hit = byLower[cand[key][i]];
@@ -261,6 +276,7 @@
       set('captured', item.createdAt);
       set('device', item.device);
       set('notes', item.notes);
+      set('filename', item.filename);
       if (map.positionSource) attrs[map.positionSource.name] = 2;     // integrated system location provider
 
       return {
@@ -271,9 +287,17 @@
 
     /* ───────────────────────── upload ───────────────────────── */
 
+    /** The layer a queued photo belongs to — set when it was taken, so switching
+        layers mid-queue can't redirect photos that were already shot. */
+    targetUrl: function (item) {
+      return item && item.serviceUrl
+        ? g.Config.urlOf(item.serviceUrl, item.layerId)
+        : g.Config.layerUrl();
+    },
+
     addFeature: function (item) {
-      var url = g.Config.layerUrl();
-      return Promise.all([token(), Arc.layerMeta()]).then(function (r) {
+      var url = Arc.targetUrl(item);
+      return Promise.all([token(), Arc.layerMeta(false, url)]).then(function (r) {
         var t = r[0], meta = r[1];
         return postJson(url + '/addFeatures', {
           f: 'json',
@@ -290,8 +314,8 @@
       });
     },
 
-    addAttachment: function (objectId, blob, name) {
-      var url = g.Config.layerUrl();
+    addAttachment: function (objectId, blob, name, layerUrl) {
+      var url = layerUrl || g.Config.layerUrl();
       return token().then(function (t) {
         var fd = new FormData();
         fd.append('f', 'json');
@@ -315,7 +339,8 @@
       return step.then(function (oid) {
         if (item.attachmentId) return item.attachmentId;
         if (!item.blob) return null;                       // point-only record
-        return Arc.addAttachment(oid, item.blob, 'photo_' + item.id.slice(0, 8) + '.jpg');
+        return Arc.addAttachment(oid, item.blob,
+          item.filename || ('photo_' + item.id.slice(0, 8) + '.jpg'), Arc.targetUrl(item));
       }).then(function (aid) {
         // the photo is deliberately kept for a while after upload: it is the only
         // local copy, and the queue view can still hand it to the device
@@ -356,7 +381,8 @@
             }).then(function () {
               summary.sent++;
               ev('sent', item);
-            }).catch(function (e) {
+            }).catch(function (raw) {
+              var e = asError(raw);
               var attempts = (item.attempts || 0) + 1;
               if (e.needAuth) summary.needAuth = true;
               if (e.retryable) summary.offline = true;
@@ -366,10 +392,13 @@
                 attempts: attempts,
                 lastError: e.message,
                 nextAttemptAt: Date.now() + Arc.backoff(attempts)
-              }).then(function () { ev('failed', item, e); });
+              }).catch(function () { /* storage itself is failing; report anyway */ })
+                .then(function () { ev('failed', item, e); });
             });
           });
         }, Promise.resolve()).then(function () { return summary; });
+      }).catch(function (raw) {
+        throw asError(raw);
       });
     }
   };

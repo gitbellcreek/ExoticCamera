@@ -194,6 +194,20 @@ body.syncing #topbar::after {
 .btn.small { padding: 8px 12px; font-size: 13px; }
 
 .row { display: flex; gap: 10px; margin-top: 16px; }
+
+/* segmented layer picker */
+.seg { display: flex; gap: 8px; flex-wrap: wrap; }
+.seg button {
+  flex: 1; min-width: 90px; padding: 10px 12px; border-radius: 11px;
+  border: 1px solid var(--line); background: #0d131d; color: var(--txt);
+  font: inherit; font-weight: 600; font-size: 14px;
+}
+.seg button.on { border-color: #2a6df0; background: #16233c; color: #cfe0ff; }
+
+/* layer rows in the picker sheet */
+.item .tick { margin-left: auto; color: var(--ok); font-size: 18px; }
+.item.on { background: #16233c; }
+.layer-url { display: block; font-size: 11px; color: var(--dim); margin-top: 3px; word-break: break-all; }
 .row .btn { flex: 1; }
 
 .fld { display: block; margin: 10px 0; font-size: 13px; color: var(--dim); }

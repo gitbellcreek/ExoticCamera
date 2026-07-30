@@ -6,49 +6,63 @@
 
   var BUILD = '__BUILD__';                    // replaced at deploy time with the commit sha
 
+  // The layers a user can switch between in the field.
+  var PRESETS = [
+    {
+      id: 'central',
+      name: 'Central',
+      serviceUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/Iphone_Images/FeatureServer',
+      layerId: 0
+    },
+    {
+      id: 'exotics',
+      name: 'Exotics',
+      serviceUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/Exotics_Camera_Points/FeatureServer',
+      layerId: 0
+    }
+  ];
+
   var DEFAULTS = {
-    // Target feature service. Layer 0 of this service is "Exotics Camera Points".
-    serviceUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/Exotics_Camera_Points/FeatureServer',
-    layerId: 0,
+    // where problem reports go
+    bugsUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/ExoticCameraBugs/FeatureServer',
+    bugsLayerId: 0,
+    reportProblems: true,                     // send crashes and upload failures automatically
+
+    activeLayer: 'central',
+    serviceUrl: PRESETS[0].serviceUrl,
+    layerId: PRESETS[0].layerId,
     portal: 'https://www.arcgis.com',
     appId: '',                                // OAuth 2.0 client id, if the org registered one
 
     maxDim: 1600,                             // long edge of the uploaded JPEG
     quality: 0.8,
-    saveToDevice: true,                       // also hand each photo to the phone
+    saveToDevice: false,                      // per-shot share sheet: off, it interrupts shooting
     keepHours: 48,                            // how long the local JPEG is kept after upload
     sound: true,
     haptics: true,
     autoSync: true,
 
-    // Field mapping. '' = auto-detect, '-' = never write this value.
-    // Defaults match the Esri GNSS metadata schema on this layer.
+    // Field mapping. '' = auto-detect from the layer, '-' = never write it.
+    // Blank by default so each layer resolves against its own schema — Central and
+    // Exotics name the same things differently.
     fields: {
-      heading:   'esrisnsr_azimuth',          // compass reading (deg)
-      lat:       'esrignss_latitude',
-      lon:       'esrignss_longitude',
-      altitude:  'esrignss_altitude',
-      accuracy:  'esrignss_h_rms',            // horizontal accuracy (m)
-      vaccuracy: 'esrignss_v_rms',
-      speed:     'esrignss_speed',            // km/h
-      course:    'esrignss_direction',        // direction of travel (deg)
-      captured:  'esrignss_fixdatetime',
-      device:    'esrignss_receiver',
-      notes:     ''
+      heading: '', lat: '', lon: '', altitude: '', accuracy: '', vaccuracy: '',
+      speed: '', course: '', captured: '', device: '', notes: '', filename: ''
     }
   };
 
   // Names we look for when a mapping is left blank.
   var CANDIDATES = {
     heading:   ['esrisnsr_azimuth', 'azimuth', 'heading', 'bearing', 'direction', 'camera_heading', 'cameradir', 'compass'],
+    filename:  ['filename', 'file_name', 'photo', 'photoname', 'image', 'imagename'],
     lat:       ['esrignss_latitude', 'latitude', 'lat', 'y'],
     lon:       ['esrignss_longitude', 'longitude', 'long', 'lon', 'x'],
     altitude:  ['esrignss_altitude', 'altitude', 'elevation', 'elev', 'alt', 'z'],
     accuracy:  ['esrignss_h_rms', 'accuracy', 'gps_accuracy', 'horizontal_accuracy', 'hacc'],
     vaccuracy: ['esrignss_v_rms', 'vertical_accuracy', 'vacc'],
     speed:     ['esrignss_speed', 'speed'],
-    course:    ['esrignss_direction', 'course', 'track'],
-    captured:  ['esrignss_fixdatetime', 'captured', 'capture_time', 'photo_date', 'datetime', 'date_time', 'timestamp'],
+    course:    ['esrignss_direction', 'course', 'track', 'course_over_ground'],
+    captured:  ['esrignss_fixdatetime', 'datetaken', 'captured', 'capture_time', 'photo_date', 'datetime', 'date_time', 'timestamp'],
     device:    ['esrignss_receiver', 'device', 'source', 'platform', 'collector'],
     notes:     ['notes', 'note', 'comment', 'comments', 'description', 'remarks']
   };
@@ -76,6 +90,7 @@
 
   var Config = {
     BUILD: BUILD,
+    PRESETS: PRESETS,
     DEFAULTS: DEFAULTS,
     CANDIDATES: CANDIDATES,
     RESERVED: RESERVED,
@@ -103,7 +118,37 @@
     /** Full REST url of the target layer. */
     layerUrl: function () {
       var c = Config.get();
-      return String(c.serviceUrl).replace(/\/+$/, '') + '/' + (c.layerId | 0);
+      return Config.urlOf(c.serviceUrl, c.layerId);
+    },
+
+    urlOf: function (serviceUrl, layerId) {
+      return String(serviceUrl).replace(/\/+$/, '') + '/' + (layerId | 0);
+    },
+
+    preset: function (id) {
+      for (var i = 0; i < PRESETS.length; i++) if (PRESETS[i].id === id) return PRESETS[i];
+      return null;
+    },
+
+    /** Which preset the current settings point at, or null for a custom layer. */
+    activePreset: function () {
+      var c = Config.get();
+      for (var i = 0; i < PRESETS.length; i++) {
+        if (PRESETS[i].serviceUrl === c.serviceUrl && PRESETS[i].layerId === (c.layerId | 0)) return PRESETS[i];
+      }
+      return null;
+    },
+
+    layerName: function () {
+      var p = Config.activePreset();
+      return p ? p.name : 'Custom layer';
+    },
+
+    /** Point the app at one of the presets. */
+    useLayer: function (id) {
+      var p = Config.preset(id);
+      if (!p) return Promise.reject(new Error('Unknown layer ' + id));
+      return Config.save({ activeLayer: p.id, serviceUrl: p.serviceUrl, layerId: p.layerId });
     }
   };
 

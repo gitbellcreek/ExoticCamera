@@ -42,10 +42,29 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
   full screen in Safari. Note that iOS gives the installed app its own storage, so
   drain the queue in Safari before switching.
 
+## Which layer photos go to
+
+Two targets ship with the app, switchable from **Menu → Layer** (and from
+Settings, where a custom service URL can be entered instead):
+
+| Name | Service |
+| --- | --- |
+| **Central** (default) | `…/Iphone_Images/FeatureServer/0` |
+| **Exotics** | `…/Exotics_Camera_Points/FeatureServer/0` |
+
+They have different schemas, so the field mapping is resolved per layer from the
+live definition rather than hard-coded. On Central the heading lands in
+`direction`, the time in `datetaken`, and the attachment name in `filename`; on
+Exotics the full Esri GNSS set is used. Anything a layer has no home for is
+simply not sent.
+
+Each photo records its destination the moment it is taken, so switching layers
+never redirects shots that are already queued — the queue view marks any photo
+bound for somewhere other than the current layer.
+
 ## Data written
 
-Layer: `…/Exotics_Camera_Points/FeatureServer/0` (Esri GNSS metadata schema,
-attachments enabled).
+On the Exotics layer (Esri GNSS metadata schema, attachments enabled):
 
 | Captured | Field |
 | --- | --- |
@@ -66,14 +85,33 @@ service URL at the app and it re-detects — nothing here is hard-wired.
 
 Geometry is sent as WGS84 (`wkid: 4326`); the service reprojects to Web Mercator.
 
+## Problem reports
+
+**Menu → Report a problem** writes a row to
+`…/ExoticCameraBugs/FeatureServer/0` with the build, the target layer, the queue
+state, sensor and permission status, device and viewport, the last GPS fix, and
+the last forty things the app did. Crashes, failed uploads and startup errors
+report themselves the same way; **Settings → Report problems automatically**
+turns that off, while the menu item always sends. No photos are ever included.
+
+The table's fields were created for this purpose: `reported`, `kind`, `summary`,
+`note`, `details` (JSON breadcrumbs + stack), `appbuild`, `layername`,
+`username`, `device`, `sensors`, `queued`, `queueerrors`, `online`, `applat`,
+`applon`. A report that cannot be sent is dropped silently — a failing bug
+report must never become a second bug.
+
 ## Working on it
 
 There are no unit tests; the checks that matter run against a browser and the live
 service, driven by Playwright from `node`. If you write your own, note the rule the
 existing ones follow: **a test may only delete features it created itself.** They
-snapshot the layer's OBJECTIDs at start and delete the difference. A `where=1=1`
-delete on this layer destroys real field data — with no undo, since the service has
-neither sync nor archiving enabled.
+snapshot the layer's OBJECTIDs at start, delete only the difference, refuse to
+delete more rows than the run could plausibly have made, and abort outright if
+the snapshot query returns anything unexpected rather than assuming an empty
+layer. A `where=1=1` delete here destroys real field data — with no undo, since
+neither service has sync or archiving enabled.
+
+Write tests point at Exotics; Central holds real photos and is only ever read.
 
 ## Signing in
 
@@ -120,10 +158,18 @@ app.css         all styling
 js/config.js    defaults, field mapping, settings persistence
 js/store.js     IndexedDB — the photo queue and key/value store
 js/arcgis.js    auth, layer metadata, addFeatures + addAttachment, retry/backoff
+js/report.js    problem reports → the ExoticCameraBugs table
 js/sound.js     synthesised UI sounds
 js/app.js       camera, compass maths, sync loop, UI wiring
 sw.js           app-shell cache + background sync
 ```
 
-`config.js`, `store.js` and `arcgis.js` are loaded by both the page and the
-service worker, so they must never touch `window` or `document`.
+`config.js`, `store.js`, `arcgis.js` and `report.js` are loaded by both the page
+and the service worker, so they must never touch `window` or `document`.
+
+The service worker serves the shell **network-first with a 2.5 s timeout**,
+falling back to cache. That keeps field users current without depending on the
+build stamp: GitHub Pages can be configured to publish the branch directly, in
+which case the workflow that rewrites `__BUILD__` never runs and every deploy
+would otherwise share one cache key. About shows *branch deploy (unstamped)*
+when that is what happened.

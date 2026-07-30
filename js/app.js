@@ -50,6 +50,13 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  function errText(e) { return Arc.asError(e).message; }
+
+  /** CI stamps the commit sha in; a plain branch deploy leaves the placeholder. */
+  function buildLabel() {
+    return /^__/.test(Config.BUILD) ? 'branch deploy (unstamped)' : Config.BUILD;
+  }
+
   function buzz(pattern) {
     if (!Config.get().haptics || !navigator.vibrate) return;
     try { navigator.vibrate(pattern); } catch (e) { /* not fatal */ }
@@ -145,16 +152,26 @@
   }
 
   var compassArmed = false, compassPending = null, gotOrientation = false;
+  var compassDenied = false, headingHopeless = false;
   var headingWaiters = [];
 
-  /** Resolve once the magnetometer produces a sample, or give up after `ms`. */
+  /**
+   * Resolve once the magnetometer produces a sample, or give up after `ms`.
+   * Only ever worth waiting for once: if the first shot times out, this device
+   * is not going to produce a heading, and the shutter should stop stalling.
+   */
   function firstHeading(ms) {
-    if (gotOrientation || !listening) return Promise.resolve();
+    if (gotOrientation || !listening || compassDenied || headingHopeless) return Promise.resolve();
     return new Promise(function (res) {
       var done = false;
-      var fin = function () { if (!done) { done = true; res(); } };
+      var fin = function (timedOut) {
+        if (done) return;
+        done = true;
+        if (timedOut === true) headingHopeless = true;
+        res();
+      };
       headingWaiters.push(fin);
-      setTimeout(fin, ms);
+      setTimeout(function () { fin(true); }, ms);
     });
   }
 
@@ -169,22 +186,26 @@
     var az = cameraAzimuth(alpha, e.beta || 0, e.gamma || 0);
     if (az === null) return;
     gotOrientation = true;
+    compassDenied = headingHopeless = false;
     pushHeading(az, 'sensor', e.webkitCompassAccuracy);
-    while (headingWaiters.length) headingWaiters.pop()();
+    while (headingWaiters.length) headingWaiters.pop()(false);
   }
 
   var listening = false;
-  function listenOrientation() {
-    if (listening) return;
-    listening = true;
-    window.addEventListener('deviceorientationabsolute', onOrientation, true);
-    window.addEventListener('deviceorientation', onOrientation, true);
+  function listenOrientation(warnIfSilent) {
+    if (!listening) {
+      listening = true;
+      window.addEventListener('deviceorientationabsolute', onOrientation, true);
+      window.addEventListener('deviceorientation', onOrientation, true);
+    }
     // Granted but silent usually means Motion & Orientation Access is off in Safari
-    setTimeout(function () {
-      if (!gotOrientation) {
-        toast('No compass data — check Settings → Safari → Motion & Orientation Access', 'warn', 7000);
-      }
-    }, 5000);
+    if (warnIfSilent) {
+      setTimeout(function () {
+        if (!gotOrientation) {
+          toast('No compass data — check Settings → Safari → Motion & Orientation Access', 'warn', 7000);
+        }
+      }, 5000);
+    }
   }
 
   function needsGesture() {
@@ -192,39 +213,56 @@
     return !!DOE && typeof DOE.requestPermission === 'function';
   }
 
+  /** Resolves true once orientation data is allowed to flow. */
   function startCompass() {
     var DOE = window.DeviceOrientationEvent;
-    if (!DOE) { toast('No compass on this device', 'warn'); return Promise.resolve(); }
-    if (!needsGesture()) { listenOrientation(); return Promise.resolve(); }
+    if (!DOE) { toast('No compass on this device', 'warn'); return Promise.resolve(false); }
+    if (!needsGesture()) { listenOrientation(true); return Promise.resolve(true); }
     if (compassPending) return compassPending;
-    compassPending = DOE.requestPermission().then(function (r) {
+    var p;
+    try {
+      p = DOE.requestPermission();
+    } catch (e) {
+      return Promise.resolve(false);     // not a valid gesture — try again on the next one
+    }
+    compassPending = Promise.resolve(p).then(function (r) {
       compassPending = null;
-      if (r === 'granted') listenOrientation();
-      else toast('Compass blocked — tap the compass to ask again', 'warn', 5000);
+      if (r === 'granted') { listenOrientation(true); return true; }
+      compassDenied = true;
+      toast('Compass blocked — tap the compass to ask again', 'warn', 5000);
+      return 'denied';
     }).catch(function () {
-      compassPending = null;             // needs a fresh gesture; the arming below retries
+      compassPending = null;
+      return false;                      // Safari refused the call; the next gesture retries
     });
     return compassPending;
   }
 
   /**
    * iOS only hands out compass data after asking, and only from a user gesture.
-   * Rather than making that a chore, fire the request on the first touch anywhere
-   * in the app — so the compass comes up on the way to the first photo.
+   * Two things make that invisible to the user:
+   *   1. listen passively first — if the origin was already granted, data flows
+   *      with no prompt and no tap at all;
+   *   2. otherwise ask on the first touch anywhere in the app.
+   * Only touchend/click are used: Safari does not treat pointerdown as a valid
+   * gesture for this call, and asking there burns the tap for nothing. The
+   * listeners stay put until a request actually resolves, so a refused call is
+   * retried on the next tap instead of being swallowed.
    */
   function armCompass() {
     if (compassArmed || !needsGesture()) return;
     compassArmed = true;
-    var fire = function () {
-      unarm();                    // one shot: after this the compass tap is the retry
-      startCompass();
-    };
     var unarm = function () {
-      document.removeEventListener('pointerdown', fire, true);
+      compassArmed = false;
       document.removeEventListener('touchend', fire, true);
       document.removeEventListener('click', fire, true);
     };
-    document.addEventListener('pointerdown', fire, true);
+    var fire = function () {
+      if (gotOrientation) return unarm();
+      startCompass().then(function (r) {
+        if (r === true || r === 'denied') unarm();   // answered; stop intercepting taps
+      });
+    };
     document.addEventListener('touchend', fire, true);
     document.addEventListener('click', fire, true);
   }
@@ -343,7 +381,7 @@
     }).catch(function (e) {
       state.busy = false;
       Sound.error();
-      toast('Capture failed: ' + e.message, 'bad');
+      toast('Capture failed: ' + errText(e), 'bad');
     });
   }
 
@@ -370,11 +408,18 @@
       heading: state.heading === null ? null : Math.round(state.heading * 10) / 10,
       headingSource: state.headingSource,
       device: deviceLabel(),
+      // pin the destination now: switching layers later must not redirect
+      // photos that were already taken
+      serviceUrl: Config.get().serviceUrl,
+      layerId: Config.get().layerId,
+      layerName: Config.layerName(),
       state: 'pending'
     };
+    item.filename = photoName(item);
     if (item.heading === null || item.heading === undefined) {
       toast('Saved without a heading — compass not available', 'warn', 4000);
     }
+    Report.note('captured', { heading: item.heading, acc: Math.round(item.hAcc || 0), layer: item.layerName });
     return Store.add(item).then(function () {
       if (Config.get().saveToDevice) saveCopy(img.blob, photoName(item));
       $('last-shot').style.backgroundImage = 'url(' + img.thumb + ')';
@@ -428,6 +473,34 @@
     a.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 15000);
     return true;
+  }
+
+  /** Hand every retained photo over at once — iOS offers "Save N Images". */
+  function saveAllToDevice() {
+    return Store.all().then(function (rows) {
+      var withPhoto = rows.filter(function (r) { return r.blob; });
+      if (!withPhoto.length) return toast('No photos still held on the device', 'warn');
+
+      var files = [];
+      for (var i = 0; i < withPhoto.length && i < 30; i++) {
+        try { files.push(new File([withPhoto[i].blob], photoName(withPhoto[i]), { type: 'image/jpeg' })); }
+        catch (e) { /* older browser: fall back to downloads below */ }
+      }
+      var more = withPhoto.length > files.length ? ' (' + files.length + ' of ' + withPhoto.length + ')' : '';
+
+      if (files.length && navigator.canShare && navigator.canShare({ files: files })) {
+        return navigator.share({ files: files }).then(function () {
+          Sound.sent();
+          toast('Handed ' + files.length + ' photo(s) to the phone' + more, 'ok');
+        }).catch(function (e) {
+          if (!e || e.name === 'AbortError') return;
+          withPhoto.forEach(function (r) { downloadBlob(r.blob, photoName(r)); });
+        });
+      }
+      withPhoto.forEach(function (r) { downloadBlob(r.blob, photoName(r)); });
+      Sound.tick();
+      toast('Saved ' + withPhoto.length + ' photo(s)', 'ok');
+    });
   }
 
   /** Drop the local JPEG once it has been uploaded and had its keep time. */
@@ -490,6 +563,7 @@
     var sentAny = false;
     return Arc.flush(function (type, item, err) {
       if (type === 'start') {
+        Report.note('upload start', item.id);
         $('chip-queue').classList.add('busy');
       } else if (type === 'sent') {
         sentAny = true;
@@ -498,7 +572,11 @@
         pulseSent();
         refreshCounts();
       } else if (type === 'failed') {
-        if (!err.retryable && !err.needAuth) toast('Upload failed: ' + err.message, 'bad', 4000);
+        Report.note('upload failed', errText(err));
+        if (!err.retryable && !err.needAuth) {
+          toast('Upload failed: ' + errText(err), 'bad', 4000);
+          Report.send(reportContext('upload', errText(err), { extra: 'item ' + item.id }));
+        }
         refreshCounts();
       }
     }, { force: force }).then(function (sum) {
@@ -522,7 +600,10 @@
       state.flushing = false;
       document.body.classList.remove('syncing');
       $('chip-queue').classList.remove('busy');
-      toast(e.message, 'bad', 4000);
+      var msg = errText(e);
+      toast(msg, 'bad', 4000);
+      Report.note('sync aborted', msg);
+      Report.send(reportContext('sync', msg, { stack: Arc.asError(e).stack }));
     });
   }
 
@@ -555,7 +636,8 @@
   }
 
   function closeSheets() {
-    ['menu', 'queue-panel', 'settings-panel', 'about-panel', 'signin-panel', 'install-panel'].forEach(function (id) {
+    ['menu', 'queue-panel', 'settings-panel', 'about-panel', 'signin-panel', 'install-panel',
+     'layer-panel', 'bug-panel'].forEach(function (id) {
       var el = $(id);
       if (!el || el.classList.contains('hidden')) return;
       el.classList.remove('open');
@@ -566,22 +648,31 @@
   function renderQueue() {
     return Store.all().then(function (rows) {
       var list = $('queue-list');
-      if (!rows.length) { list.innerHTML = '<p class="hint">Queue is empty.</p>'; return; }
+      if (!rows.length) {
+        list.innerHTML = '<p class="hint">Queue is empty.</p>';
+        $('q-save-hint').textContent = '';
+        return;
+      }
       list.innerHTML = rows.map(function (r) {
         var when = new Date(r.createdAt).toLocaleString();
         var sub = r.state === 'sent' ? 'uploaded · OBJECTID ' + (r.objectId || '?')
           : r.state === 'error' ? esc(r.lastError || 'failed')
           : r.state === 'uploading' ? 'uploading…'
           : r.attempts ? 'retry ' + r.attempts + (r.lastError ? ' · ' + esc(r.lastError) : '') : 'waiting';
+        var where = r.layerName && r.layerName !== Config.layerName() ? ' → ' + esc(r.layerName) : '';
         return '<div class="qrow ' + r.state + '">' +
           '<div class="qthumb" style="background-image:url(' + (r.thumb || '') + ')"></div>' +
           '<div class="qmeta"><b>' + esc(when) + '</b>' +
           '<span>' + (r.heading === null || r.heading === undefined ? 'no heading' : Math.round(r.heading) + '°') +
-          ' · ' + (r.hAcc ? '±' + Math.round(r.hAcc) + 'm' : 'no acc') + '</span>' +
+          ' · ' + (r.hAcc ? '±' + Math.round(r.hAcc) + 'm' : 'no acc') + where + '</span>' +
           '<span class="qsub">' + sub + '</span></div>' +
           (r.blob ? '<button class="qsave" data-id="' + r.id + '" aria-label="Save to device">⤓</button>' : '') +
           '<button class="qdel" data-id="' + r.id + '" aria-label="Delete">✕</button></div>';
       }).join('');
+      var held = rows.filter(function (r) { return r.blob; }).length;
+      $('q-save-hint').textContent = held
+        ? held + ' photo(s) still held on this device (' + (Config.get().keepHours || 48) + 'h after upload).'
+        : 'No local copies left — they are cleared after upload.';
       Array.prototype.forEach.call(list.querySelectorAll('.qsave'), function (b) {
         b.addEventListener('click', function () {
           Store.item(b.dataset.id).then(function (r) {
@@ -600,8 +691,57 @@
     });
   }
 
+  /* ── layer picker ─────────────────────────────────────────────── */
+
+  function renderLayerPicker() {
+    var active = Config.activePreset();
+    $('mi-layer-sub').textContent = Config.layerName();
+    $('layer-list').innerHTML = Config.PRESETS.map(function (p) {
+      var on = active && active.id === p.id;
+      return '<button class="item' + (on ? ' on' : '') + '" data-layer="' + p.id + '">' +
+        '<span class="i">▤</span><span>' + esc(p.name) +
+        '<span class="layer-url">' + esc(p.serviceUrl.replace(/^https:\/\/[^/]+\/.*?\/services\//, '…/')) + '</span></span>' +
+        (on ? '<span class="tick">✓</span>' : '') + '</button>';
+    }).join('') + (active ? '' :
+      '<div class="item on"><span class="i">✎</span><span>Custom layer' +
+      '<span class="layer-url">' + esc(Config.layerUrl()) + '</span></span><span class="tick">✓</span></div>');
+
+    Array.prototype.forEach.call($('layer-list').querySelectorAll('[data-layer]'), function (b) {
+      b.addEventListener('click', function () {
+        var id = b.dataset.layer;
+        if (Config.activePreset() && Config.activePreset().id === id) return closeSheets();
+        Config.useLayer(id).then(function () {
+          Sound.tick();
+          renderLayerPicker();
+          closeSheets();
+          toast('Photos now go to ' + Config.layerName(), 'ok');
+          return Arc.layerMeta(true).catch(function () { /* offline: resolved on upload */ });
+        });
+      });
+    });
+  }
+
+  function renderPresetButtons() {
+    var active = Config.activePreset();
+    $('s-presets').innerHTML = Config.PRESETS.map(function (p) {
+      return '<button data-layer="' + p.id + '"' + (active && active.id === p.id ? ' class="on"' : '') + '>' +
+        esc(p.name) + '</button>';
+    }).join('');
+    Array.prototype.forEach.call($('s-presets').children, function (b) {
+      b.addEventListener('click', function () {
+        var p = Config.preset(b.dataset.layer);
+        $('s-url').value = p.serviceUrl;         // fill the fields; Save commits it
+        $('s-layer').value = p.layerId;
+        Array.prototype.forEach.call($('s-presets').children, function (o) { o.classList.remove('on'); });
+        b.classList.add('on');
+        Sound.tick();
+      });
+    });
+  }
+
   function loadSettingsForm() {
     var c = Config.get();
+    renderPresetButtons();
     $('s-url').value = c.serviceUrl;
     $('s-layer').value = c.layerId;
     $('s-appid').value = c.appId;
@@ -613,6 +753,7 @@
     $('s-sound').checked = c.sound;
     $('s-haptics').checked = c.haptics;
     $('s-autosync').checked = c.autoSync;
+    $('s-report').checked = c.reportProblems;
     ['heading', 'lat', 'lon', 'accuracy', 'altitude', 'captured', 'notes', 'device'].forEach(function (k) {
       var el = $('s-f-' + k);
       if (el) el.value = c.fields[k] || '';
@@ -632,6 +773,7 @@
       sound: $('s-sound').checked,
       haptics: $('s-haptics').checked,
       autoSync: $('s-autosync').checked,
+      reportProblems: $('s-report').checked,
       fields: {}
     };
     ['heading', 'lat', 'lon', 'accuracy', 'altitude', 'captured', 'notes', 'device'].forEach(function (k) {
@@ -639,9 +781,13 @@
       if (el) patch.fields[k] = el.value.trim();
     });
     return Config.save(patch).then(function (c) {
+      var p = Config.activePreset();
+      return Config.save({ activeLayer: p ? p.id : 'custom' });
+    }).then(function (c) {
       Sound.setEnabled(c.sound);
       Sound.tick();
-      toast('Settings saved', 'ok');
+      renderLayerPicker();
+      toast('Settings saved — photos go to ' + Config.layerName(), 'ok');
       closeSheets();
     });
   }
@@ -655,6 +801,74 @@
         ? (live ? 'token valid until ' + new Date(a.expires).toLocaleString() : 'session expired')
         : 'ArcGIS Online';
       $('auth-btn').textContent = a ? 'Sign out' : 'Sign in';
+    });
+  }
+
+  /* ─────────────────────── problem reports ────────────────────────── */
+
+  function sensorState() {
+    return [
+      'compass=' + (gotOrientation ? 'live' : listening ? 'listening' : 'off'),
+      'hdg=' + (state.heading === null ? 'none' : Math.round(state.heading)),
+      'gps=' + (state.pos ? '±' + Math.round(state.pos.coords.accuracy) + 'm' : 'none'),
+      'cam=' + (state.stream ? 'on' : 'off'),
+      'standalone=' + (isStandalone() ? 'yes' : 'no'),
+      'gesture=' + (needsGesture() ? 'required' : 'no')
+    ].join(' ');
+  }
+
+  function reportContext(kind, summary, extra) {
+    var p = state.pos && state.pos.coords;
+    return {
+      kind: kind,
+      summary: summary,
+      sensors: sensorState(),
+      device: navigator.userAgent + ' | ' + screen.width + 'x' + screen.height +
+              ' | ' + window.innerWidth + 'x' + window.innerHeight,
+      queued: state.counts.outstanding,
+      queueErrors: state.counts.error,
+      online: state.online,
+      lat: p ? p.latitude : undefined,
+      lon: p ? p.longitude : undefined,
+      stack: extra && extra.stack,
+      extra: extra && extra.extra
+    };
+  }
+
+  function watchForProblems() {
+    window.addEventListener('error', function (e) {
+      var msg = e.message || 'Script error';
+      Report.note('window.error', msg);
+      Report.send(reportContext('crash', msg, {
+        stack: e.error && e.error.stack, extra: e.filename + ':' + e.lineno
+      }));
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var r = Arc.asError(e.reason);
+      Report.note('unhandled rejection', r.message);
+      Report.send(reportContext('crash', r.message, { stack: r.stack }));
+    });
+  }
+
+  function openBugPanel() {
+    $('bug-preview').textContent = sensorState() + ' · queue ' + state.counts.outstanding +
+      (state.counts.error ? ' (' + state.counts.error + ' failed)' : '') +
+      ' · build ' + buildLabel();
+    $('bug-note').value = '';
+    openSheet('bug-panel');
+  }
+
+  function sendBugReport() {
+    var note = $('bug-note').value.trim();
+    $('bug-send').disabled = true;
+    return Report.send(Object.assign(
+      reportContext('manual', note || 'Manual report'),
+      { note: note }
+    )).then(function (okSent) {
+      $('bug-send').disabled = false;
+      closeSheets();
+      if (okSent) { Sound.sent(); toast('Report sent — thank you', 'ok'); }
+      else { Sound.error(); toast('Could not send the report (offline or signed out)', 'bad', 4500); }
     });
   }
 
@@ -768,12 +982,16 @@
     // iOS only hands out compass data after a gesture — tapping the dial asks
     $('compass').addEventListener('click', function () {
       Sound.unlock();
-      if (state.heading === null) startCompass();
+      if (state.heading === null) {
+        compassDenied = headingHopeless = false;
+        startCompass().then(function (r) { if (r !== true) armCompass(); });
+      }
       else toast('Heading ' + Math.round(state.heading) + '° (' + (state.headingSource === 'gps' ? 'GPS course' : 'magnetometer') + ')');
     });
 
     $('menu-btn').addEventListener('click', function () {
       Sound.unlock(); Sound.tick();
+      renderLayerPicker();
       renderAuth().then(function () { openSheet('menu'); });
     });
     $('last-shot').addEventListener('click', function () { renderQueue().then(function () { openSheet('queue-panel'); }); });
@@ -784,15 +1002,21 @@
       toast(p ? p.latitude.toFixed(6) + ', ' + p.longitude.toFixed(6) + ' ±' + Math.round(p.accuracy) + 'm' : 'No fix yet');
     });
 
+    $('mi-layer').addEventListener('click', function () { renderLayerPicker(); openSheet('layer-panel'); });
+    $('l-close').addEventListener('click', closeSheets);
     $('mi-queue').addEventListener('click', function () { renderQueue().then(function () { openSheet('queue-panel'); }); });
     $('mi-sync').addEventListener('click', function () { closeSheets(); sync(true); });
     $('mi-settings').addEventListener('click', function () { loadSettingsForm(); openSheet('settings-panel'); });
     $('mi-install').addEventListener('click', offerInstall);
     $('i-close').addEventListener('click', closeSheets);
     $('mi-reinstall').addEventListener('click', reinstall);
+    $('mi-bug').addEventListener('click', openBugPanel);
+    $('bug-close').addEventListener('click', closeSheets);
+    $('bug-send').addEventListener('click', sendBugReport);
     $('mi-about').addEventListener('click', function () {
       $('about-body').innerHTML =
-        'Build <b>' + esc(Config.BUILD) + '</b><br>Layer: <code>' + esc(Config.layerUrl()) + '</code><br>' +
+        'Build <b>' + esc(buildLabel()) + '</b><br>' +
+        'Layer: <b>' + esc(Config.layerName()) + '</b><br><code>' + esc(Config.layerUrl()) + '</code><br>' +
         'Photos are queued on the device and uploaded as points with an attached JPEG.<br>' +
         'Heading comes from the magnetometer (tilt compensated), falling back to GPS course.';
       openSheet('about-panel');
@@ -804,6 +1028,9 @@
           return Store.patch(r.id, { state: 'pending', nextAttemptAt: 0, attempts: 0, lastError: null });
         }));
       }).then(refreshCounts).then(function () { closeSheets(); return sync(true); }).then(renderQueue);
+    });
+    $('q-save-all').addEventListener('click', function () {
+      saveAllToDevice().then(renderQueue);
     });
     $('q-clear-done').addEventListener('click', function () {
       Store.removeSent().then(renderQueue).then(refreshCounts);
@@ -826,7 +1053,7 @@
           (meta.hasAttachments ? 'on' : '<span class="bad-text">off</span>') + '<br>' +
           Object.keys(map).map(function (k) { return k + ' → <code>' + esc(map[k].name) + '</code>'; }).join('<br>');
       }).catch(function (e) {
-        $('s-schema').innerHTML = '<span class="bad-text">' + esc(e.message) + '</span>';
+        $('s-schema').innerHTML = '<span class="bad-text">' + esc(errText(e)) + '</span>';
       });
     });
 
@@ -853,7 +1080,7 @@
         return renderAuth().then(function () { return sync(); });
       }).catch(function (e) {
         Sound.error();
-        toast(e.message, 'bad', 4000);
+        toast(errText(e), 'bad', 4000);
       }).then(function () { $('si-go').disabled = false; });
     });
     $('si-token-go').addEventListener('click', function () {
@@ -898,15 +1125,18 @@
   /* ────────────────────────────── boot ────────────────────────────── */
 
   function boot() {
+    watchForProblems();
+    Report.note('boot', navigator.userAgent.slice(0, 120));
     buildDial();
     renderHeading();
     wire();
 
     Config.load().then(function (c) {
       Sound.setEnabled(c.sound);
-      $('mi-about-sub').textContent = 'build ' + Config.BUILD;
+      $('mi-about-sub').textContent = 'build ' + buildLabel();
+      $('mi-layer-sub').textContent = Config.layerName();
       return Arc.completeOAuth().catch(function (e) {
-        toast('Sign-in failed: ' + e.message, 'bad', 5000);
+        toast('Sign-in failed: ' + errText(e), 'bad', 5000);
         return null;
       });
     }).then(function (a) {
@@ -920,8 +1150,14 @@
       scheduleSync();
       registerSW();
       startGPS();
-      if (needsGesture()) armCompass();      // iOS: ask on the first touch, wherever it lands
-      else startCompass();                   // everywhere else it just works
+      if (needsGesture()) {
+        // a previously granted origin often streams data with no prompt at all
+        listenOrientation(false);
+        armCompass();
+        setTimeout(function () { if (!gotOrientation) armCompass(); }, 1500);
+      } else {
+        startCompass();
+      }
       return startCamera();
     }).then(function () {
       return Store.all();
@@ -930,7 +1166,9 @@
       if (state.online && state.counts.outstanding && Config.get().autoSync) sync();
       return pruneLocalCopies().then(maybeHintInstall);
     }).catch(function (e) {
-      toast('Startup problem: ' + e.message, 'bad', 5000);
+      var msg = errText(e);
+      toast('Startup problem: ' + msg, 'bad', 5000);
+      Report.send(reportContext('startup', msg, { stack: Arc.asError(e).stack }));
     });
   }
 

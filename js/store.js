@@ -11,6 +11,7 @@
     if (dbp) return dbp;
     dbp = new Promise(function (resolve, reject) {
       var req = indexedDB.open(DB, VERSION);
+      req.onblocked = function () { reject(new Error('Device storage is busy in another tab')); };
       req.onupgradeneeded = function (e) {
         var db = e.target.result;
         if (!db.objectStoreNames.contains('queue')) {
@@ -21,9 +22,24 @@
         if (!db.objectStoreNames.contains('kv')) db.createObjectStore('kv', { keyPath: 'k' });
       };
       req.onsuccess = function () { resolve(req.result); };
-      req.onerror = function () { reject(req.error); };
+      req.onerror = function () {
+        dbp = null;                                  // let a later call try again
+        reject(dbError(req, 'Device storage unavailable'));
+      };
     });
     return dbp;
+  }
+
+  /* IndexedDB hands back a null `error` in several failure paths (notably an
+     aborted transaction on Safari). Rejecting with null makes every downstream
+     `catch (e) { e.something }` throw a second, useless error, so always reject
+     with a real Error. */
+  function dbError(src, what) {
+    var e = src && src.error;
+    if (e) return e;
+    var err = new Error(what);
+    err.name = 'UnknownError';
+    return err;
   }
 
   function tx(store, mode, fn) {
@@ -32,8 +48,8 @@
         var t = db.transaction(store, mode);
         var out;
         t.oncomplete = function () { resolve(out); };
-        t.onerror = function () { reject(t.error); };
-        t.onabort = function () { reject(t.error); };
+        t.onerror = function () { reject(dbError(t, 'Device storage write failed')); };
+        t.onabort = function () { reject(dbError(t, 'Device storage write was aborted — the device may be out of space')); };
         out = fn(t.objectStore(store), function (v) { out = v; });
       });
     });
@@ -42,7 +58,7 @@
   function reqp(r) {
     return new Promise(function (res, rej) {
       r.onsuccess = function () { res(r.result); };
-      r.onerror = function () { rej(r.error); };
+      r.onerror = function () { rej(dbError(r, 'Device storage read failed')); };
     });
   }
 
@@ -91,6 +107,7 @@
           var t = db.transaction('queue', 'readwrite');
           var s = t.objectStore('queue');
           var out = null;
+          t.onabort = function () { reject(dbError(t, 'Device storage write was aborted — the device may be out of space')); };
           s.get(id).onsuccess = function (e) {
             var it = e.target.result;
             if (!it) return;
@@ -99,7 +116,7 @@
             s.put(it);
           };
           t.oncomplete = function () { resolve(out); };
-          t.onerror = function () { reject(t.error); };
+          t.onerror = function () { reject(dbError(t, 'Device storage write failed')); };
         });
       });
     },
