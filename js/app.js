@@ -4,6 +4,13 @@
 
   var $ = function (id) { return document.getElementById(id); };
 
+  // Reporting is a nicety; the camera is not. If report.js failed to load —
+  // a partial cache, a bad deploy — carry on without it.
+  if (typeof Report === 'undefined') {
+    self.Report = { note: function () {}, breadcrumbs: function () { return []; },
+                    send: function () { return Promise.resolve(false); } };
+  }
+
   var state = {
     stream: null,
     facing: 'environment',
@@ -291,23 +298,41 @@
 
   function startCamera() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      return showNoVideo('This browser has no camera API — use the file picker.');
+      showNoVideo('This browser has no camera API — use the file picker.');
+      return Promise.resolve();
     }
     stopCamera();
-    return navigator.mediaDevices.getUserMedia({
+
+    // getUserMedia can sit unresolved indefinitely — after a cold start with the
+    // radio off, notably. A viewfinder that never arrives and never explains
+    // itself is just a black screen, so give it a deadline.
+    var settled = false;
+    var deadline = new Promise(function (res) {
+      setTimeout(function () {
+        if (!settled) { showNoVideo('Camera did not start. Tap to try again.'); res(); }
+      }, 8000);
+    });
+
+    var open = navigator.mediaDevices.getUserMedia({
       audio: false,
       video: { facingMode: { ideal: state.facing }, width: { ideal: 2560 }, height: { ideal: 1920 } }
     }).then(function (s) {
+      settled = true;
       state.stream = s;
       var v = $('preview');
       v.srcObject = s;
       $('novideo').classList.add('hidden');
       return v.play().catch(function () { /* autoplay quirks — the tap already started it */ });
     }).catch(function (e) {
-      showNoVideo(e && e.name === 'NotAllowedError'
-        ? 'Camera permission denied.'
-        : 'Camera unavailable (' + (e && e.name) + ').');
+      settled = true;
+      var name = Arc.asError(e).name || (e && e.name);
+      Report.note('camera failed', name);
+      showNoVideo(name === 'NotAllowedError'
+        ? 'Camera permission denied. Tap to try again.'
+        : 'Camera unavailable (' + name + '). Tap to try again.');
     });
+
+    return Promise.race([open, deadline]);
   }
 
   function stopCamera() {
@@ -320,6 +345,16 @@
   function showNoVideo(msg) {
     $('novideo-msg').textContent = msg;
     $('novideo').classList.remove('hidden');
+  }
+
+  /** Last resort: say what went wrong instead of leaving a black rectangle. */
+  function showFatal(msg) {
+    try {
+      showNoVideo('Something went wrong starting the app: ' + msg);
+      var btn = $('start-cam');
+      btn.textContent = 'Reload';
+      btn.onclick = function () { location.reload(); };
+    } catch (e) { /* nothing left to do */ }
   }
 
   function drawToBlob(source, sw, sh) {
@@ -1158,9 +1193,10 @@
       } else {
         startCompass();
       }
-      return startCamera();
-    }).then(function () {
-      return Store.all();
+      startCamera();                        // deliberately not awaited: a slow
+      return Store.all();                   // camera must not hold up the queue
+    }).then(function (rows) {
+      return rows;
     }).then(function (rows) {
       if (rows.length && rows[0].thumb) $('last-shot').style.backgroundImage = 'url(' + rows[0].thumb + ')';
       if (state.online && state.counts.outstanding && Config.get().autoSync) sync();
@@ -1168,6 +1204,7 @@
     }).catch(function (e) {
       var msg = errText(e);
       toast('Startup problem: ' + msg, 'bad', 5000);
+      showFatal(msg);
       Report.send(reportContext('startup', msg, { stack: Arc.asError(e).stack }));
     });
   }
@@ -1188,6 +1225,15 @@
     });
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
-  else boot();
+  function safeBoot() {
+    self.__ecBooted = true;                  // the watchdog in index.html checks this
+    try {
+      boot();
+    } catch (e) {
+      showFatal(typeof Arc !== 'undefined' && Arc.asError ? Arc.asError(e).message : String(e));
+    }
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', safeBoot);
+  else safeBoot();
 })();

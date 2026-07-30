@@ -167,6 +167,21 @@ sw.js           app-shell cache + background sync
 `config.js`, `store.js`, `arcgis.js` and `report.js` are loaded by both the page
 and the service worker, so they must never touch `window` or `document`.
 
+Offline hardening, learned the hard way — an offline-first app that shows a black
+screen is worse than one that admits defeat:
+
+- The worker answers an uncached sub-resource with a 504, never with `index.html`.
+  Handing the parser HTML where a script was expected kills the whole app with a
+  syntax error. Only page navigations fall back to the shell.
+- `importScripts` in the worker is lazy and wrapped: a failure there must not stop
+  it serving the app.
+- `REV` in `sw.js` keys the cache. Bump it whenever the file list changes — a
+  half-populated cache is exactly what turns an offline launch into a blank
+  screen, and with Pages publishing the branch there is no build stamp to rely on.
+- `getUserMedia` has an 8 s deadline; a camera that never answers now says so.
+- The page tolerates a missing `report.js`, `boot()` is wrapped, and an inline
+  watchdog in `index.html` speaks up if `app.js` never ran at all.
+
 The service worker serves the shell **network-first with a 2.5 s timeout**,
 falling back to cache. That keeps field users current without depending on the
 build stamp: GitHub Pages can be configured to publish the branch directly, in

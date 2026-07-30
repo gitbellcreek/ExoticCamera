@@ -4,7 +4,12 @@
 'use strict';
 
 var BUILD = '__BUILD__';
-var CACHE = 'exoticcam-' + BUILD;
+// Bump REV whenever the file list changes. GitHub Pages may publish the branch
+// directly, in which case BUILD is never stamped and this is the only thing that
+// forces a fresh, complete precache — a half-populated cache is what turns an
+// offline launch into a blank screen.
+var REV = 'r2';
+var CACHE = 'exoticcam-' + BUILD + '-' + REV;
 
 var SHELL = [
   './',
@@ -68,7 +73,15 @@ self.addEventListener('fetch', function (e) {
         return res;
       });
 
-      if (!hit) return net.catch(function () { return caches.match('index.html'); });
+      if (!hit) {
+        return net.catch(function () {
+          // Only a page navigation may fall back to the shell. Answering a
+          // script or stylesheet with index.html hands the parser HTML, which
+          // dies as a syntax error and takes the whole app down with it.
+          if (req.mode === 'navigate') return caches.match('index.html');
+          return new Response('', { status: 504, statusText: 'Offline and not cached' });
+        });
+      }
 
       // we have a copy: take the network if it is prompt, otherwise fall back
       return new Promise(function (resolve) {
@@ -83,9 +96,22 @@ self.addEventListener('fetch', function (e) {
 
 /* ── background upload ─────────────────────────────────────── */
 
-importScripts('js/store.js', 'js/config.js', 'js/arcgis.js', 'js/report.js');
+/* Imported lazily and defensively: a failure here must never stop the worker
+   from serving the app offline, which is its more important job. */
+var modulesLoaded = false;
+function loadModules() {
+  if (modulesLoaded) return true;
+  try {
+    importScripts('js/store.js', 'js/config.js', 'js/arcgis.js', 'js/report.js');
+    modulesLoaded = true;
+  } catch (e) {
+    modulesLoaded = false;
+  }
+  return modulesLoaded;
+}
 
 function drain() {
+  if (!loadModules()) return Promise.resolve(null);
   return self.Config.load().then(function () {
     return self.Arc.flush(function () {});
   }).then(function (sum) {

@@ -264,3 +264,17 @@
 <script src="js/report.js"></script>
 <script src="js/sound.js"></script>
 <script src="js/app.js"></script>
+<script>
+// Watchdog: if app.js itself never ran — a missing file, a bad cache entry, a
+// syntax error — say so on screen instead of leaving a black viewfinder.
+setTimeout(function () {
+  if (self.__ecBooted) return;
+  var panel = document.getElementById('novideo');
+  var msg = document.getElementById('novideo-msg');
+  if (!panel || !msg) return;
+  msg.textContent = 'The app did not start. Its files may be incomplete — reload to fetch them again.';
+  panel.classList.remove('hidden');
+  var btn = document.getElementById('start-cam');
+  if (btn) { btn.textContent = 'Reload'; btn.onclick = function () { location.reload(true); }; }
+}, 4000);
+</script>
