@@ -322,6 +322,15 @@
       var v = $('preview');
       v.srcObject = s;
       $('novideo').classList.add('hidden');
+      lastFrameTime = -1;
+      staleTicks = 0;
+
+      var track = s.getVideoTracks()[0];
+      if (track) {
+        track.addEventListener('ended', function () { recoverCamera('track ended'); });
+        track.addEventListener('mute', function () { Report.note('camera muted'); });
+        track.addEventListener('unmute', function () { v.play().catch(function () {}); });
+      }
       return v.play().catch(function () { /* autoplay quirks — the tap already started it */ });
     }).catch(function (e) {
       settled = true;
@@ -333,6 +342,48 @@
     });
 
     return Promise.race([open, deadline]);
+  }
+
+  /* ── keeping the preview alive ──────────────────────────────────
+     iOS suspends the capture session for all sorts of reasons — an incoming
+     call, another app grabbing the camera, a thermal pause — and hands back a
+     stream whose tracks are still "live" while no new frames arrive. The
+     preview freezes on its last frame, and the only clue is that nothing
+     moves. Flipping the camera fixes it because that builds a new stream. */
+
+  var lastFrameTime = -1, staleTicks = 0, lastRecovery = 0;
+
+  function cameraHealthy() {
+    var v = $('preview');
+    if (!state.stream || !v) return false;
+    var t = state.stream.getVideoTracks()[0];
+    if (!t || t.readyState !== 'live' || t.muted) return false;
+    return !!v.videoWidth;
+  }
+
+  function recoverCamera(why) {
+    if (Date.now() - lastRecovery < 8000) return Promise.resolve();  // don't loop
+    lastRecovery = Date.now();
+    staleTicks = 0;
+    lastFrameTime = -1;
+    Report.note('camera recovery', why);
+    toast('Camera stalled — restarting it', 'warn');
+    return startCamera();
+  }
+
+  function watchCamera() {
+    setInterval(function () {
+      if (document.visibilityState !== 'visible' || !state.stream) return;
+      var v = $('preview');
+      var now = v.currentTime;
+      if (now === lastFrameTime) staleTicks++; else staleTicks = 0;
+      lastFrameTime = now;
+
+      if (staleTicks === 1 && v.paused) v.play().catch(function () { /* retried below */ });
+      // ~6s without a new frame while the app is in front: the preview is stuck
+      if (staleTicks >= 3) recoverCamera('no new frames');
+      else if (!cameraHealthy()) recoverCamera('video track not delivering');
+    }, 2000);
   }
 
   function stopCamera() {
@@ -390,6 +441,15 @@
       toast('No GPS fix yet — waiting for location', 'bad', 3500);
       return Promise.resolve();
     }
+    // A stalled preview shows the last good frame, so a shot taken now would
+    // quietly record a stale image at the current GPS fix.
+    if (state.stream && !cameraHealthy()) {
+      Sound.error();
+      toast('Preview had stalled — restarting, take it again', 'warn', 3500);
+      recoverCamera('stalled at the shutter');
+      return Promise.resolve();
+    }
+
     state.busy = true;
     // The first shot often lands while the compass permission dialog is still up.
     // Wait for the answer, then briefly for the first sample, so shot one is not
@@ -889,7 +949,8 @@
       'compass=' + (gotOrientation ? 'live' : listening ? 'listening' : 'off'),
       'hdg=' + (state.heading === null ? 'none' : Math.round(state.heading)),
       'gps=' + (state.pos ? '±' + Math.round(state.pos.coords.accuracy) + 'm' : 'none'),
-      'cam=' + (state.stream ? 'on' : 'off'),
+      'cam=' + (state.stream ? (cameraHealthy() ? 'live' : 'stalled') : 'off'),
+      'camstale=' + staleTicks,
       'standalone=' + (isStandalone() ? 'yes' : 'no'),
       'gesture=' + (needsGesture() ? 'required' : 'no')
     ].join(' ');
@@ -1035,6 +1096,9 @@
 
   function wire() {
     $('shutter').addEventListener('click', function () { Sound.unlock(); capture(); });
+    $('preview').addEventListener('click', function () {
+      if (!cameraHealthy()) { lastRecovery = 0; recoverCamera('tapped the preview'); }
+    });
     $('flip-cam').addEventListener('click', function () {
       state.facing = state.facing === 'environment' ? 'user' : 'environment';
       Sound.tick();
@@ -1195,7 +1259,7 @@
       refreshCounts().then(function () {
         if (state.online && Config.get().autoSync) sync();
       });
-      if (!state.stream) startCamera();
+      if (!cameraHealthy()) startCamera();
     });
     window.addEventListener('pagehide', stopCamera);
   }
@@ -1236,6 +1300,7 @@
       } else {
         startCompass();
       }
+      watchCamera();
       startCamera();                        // deliberately not awaited: a slow
       return Store.all();                   // camera must not hold up the queue
     }).then(function (rows) {

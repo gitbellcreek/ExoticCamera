@@ -32,6 +32,12 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
   in ArcGIS.
 - **The viewfinder shows the whole frame** that will be captured, letterboxed, rather
   than a cropped preview of a wider photo.
+- **A frozen preview fixes itself.** iOS can suspend the capture session — a call,
+  another app taking the camera, a thermal pause — and hand back a stream whose
+  tracks still report `live` while no frames arrive. A watchdog notices that the
+  frame clock has stopped and rebuilds the stream, which is what flipping the camera
+  used to do by hand. A stalled preview also refuses the shutter, since capturing
+  then would file the last good frame against your current GPS fix.
 - **Works offline.** Photos go into IndexedDB on the device and upload themselves
   when the connection comes back — including via Background Sync while the app is
   closed, on browsers that support it.
