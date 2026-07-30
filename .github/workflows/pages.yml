@@ -2,7 +2,9 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [main]
+    # this branch is currently the repo default; `main` is listed so the
+    # deploy keeps working if the branch is renamed or merged later
+    branches: [main, claude/mobile-arcgis-photo-app-6sbfip]
   workflow_dispatch:
 
 permissions:
