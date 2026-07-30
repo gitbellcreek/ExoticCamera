@@ -70,8 +70,16 @@ the app asks for a sign-in.
 
 ## Hosting
 
-The included workflow publishes the repo root to GitHub Pages on every push to
-the default branch, and switches Pages on itself the first time it runs. It stamps
+**One manual step, once:** open **Settings → Pages** and set *Build and
+deployment → Source* to **GitHub Actions**. The workflow asks for this
+automatically (`enablement: true`), but GitHub does not let a workflow token
+create the Pages site on a user-owned repo — it fails with *"Create Pages site
+failed: Resource not accessible by integration"* until the switch is flipped by
+hand. After that, re-run the latest **Deploy to GitHub Pages** run (or push
+anything) and it publishes.
+
+The workflow then publishes the repo root on every push to the default
+branch. It stamps
 the commit sha into `sw.js` and `js/config.js`, which is what makes each deploy
 invalidate the old cache and show up in **Menu → About**.
 
