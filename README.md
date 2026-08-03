@@ -69,7 +69,11 @@ Tests are in **[tests/](tests/README.md)**.
   closed, on browsers that support it.
 - **Resumable uploads.** Each photo is a point (`addFeatures`) plus an attachment
   (`addAttachment`). If the connection drops between the two, the retry picks up at
-  the attachment instead of creating a duplicate point.
+  the attachment instead of creating a duplicate point. Every request has a
+  deadline, so a connection that accepts an upload and then goes quiet fails
+  visibly and lets the photos behind it through, rather than stalling the queue
+  with nothing to show for it. A point that is on the layer without its photo
+  says so in the queue instead of reading "uploaded".
 - **Quiet audio + visual feedback.** A shutter click on capture, a soft two-note
   lift when a photo lands on the server, a gentle descending pair when the
   connection drops, and a three-note chime when the queue finally drains. All

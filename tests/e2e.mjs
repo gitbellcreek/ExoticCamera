@@ -27,7 +27,7 @@ const Store = {
   outstanding: async () => [...queue.values()].filter(i => i.state !== 'sent'),
 };
 
-const sandbox = { self: null, console, fetch, FormData, Blob, URLSearchParams, crypto, TextEncoder, btoa, Date, Math, JSON, Promise, Error, String, Number, Object, Array, isFinite, parseInt, setTimeout, location: { origin: 'https://example.github.io' } };
+const sandbox = { self: null, console, fetch, FormData, Blob, URLSearchParams, crypto, TextEncoder, btoa, Date, Math, JSON, Promise, Error, String, Number, Object, Array, isFinite, parseInt, setTimeout, clearTimeout, AbortController, location: { origin: 'https://example.github.io' } };
 sandbox.self = sandbox;
 vm.createContext(sandbox);
 sandbox.Store = Store;

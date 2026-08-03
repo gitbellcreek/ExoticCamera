@@ -16,6 +16,7 @@
       var w = new Error(e.message || e.name || 'Unexpected error');
       if (e.needAuth) w.needAuth = true;
       if (e.retryable) w.retryable = true;
+      if (e.timeout) w.timeout = true;
       return w;
     }
     return new Error(e ? String(e) : 'Unexpected error');
@@ -23,6 +24,10 @@
 
   function NeedAuth(msg) { var e = new Error(msg || 'Sign in required'); e.needAuth = true; return e; }
   function Retryable(msg) { var e = new Error(msg); e.retryable = true; return e; }
+  /* A deadline is not the same as no signal: it means the connection answered
+     slowly, not that it is gone, so the drain carries on to the next photo
+     instead of stopping and leaving the rest with nothing written against them. */
+  function Timeout(msg) { var e = Retryable(msg); e.timeout = true; return e; }
 
   function form(obj) {
     var b = new URLSearchParams();
@@ -32,13 +37,43 @@
     return b;
   }
 
-  function postJson(url, body) {
-    return fetch(url, {
+  /* A request with no deadline is not patient, it is stuck. `fetch` will sit on a
+     half-open connection indefinitely — and because the queue drains one photo at
+     a time, one hung upload holds up every photo behind it, with nothing written
+     back to say so. iOS then suspends the app mid-request and even the timer is
+     lost. A deadline turns that into an ordinary retry that leaves a trace. */
+  var TIMEOUTS = { json: 30000, upload: 120000 };   // upload: a big attachment on a poor field connection
+
+  function postJson(url, body, timeoutMs) {
+    var ms = timeoutMs || TIMEOUTS.json;
+    var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    var late = 'Timed out after ' + Math.round(ms / 1000) + 's';
+    var timedOut = false, timer = null;
+
+    var req = fetch(url, {
       method: 'POST',
+      signal: ctl ? ctl.signal : undefined,
       body: body instanceof FormData ? body : form(body),
       headers: body instanceof FormData ? undefined : { 'Content-Type': 'application/x-www-form-urlencoded' }
     }).catch(function () {
-      throw Retryable('Network unreachable');
+      throw timedOut ? Timeout(late) : Retryable('Network unreachable');
+    });
+
+    return new Promise(function (resolve, reject) {
+      // the timer also covers browsers with no AbortController, where the fetch
+      // itself keeps running — we simply stop waiting on it
+      timer = setTimeout(function () {
+        timedOut = true;
+        if (ctl) ctl.abort();
+        reject(Timeout(late));
+      }, ms);
+      req.then(resolve, reject);
+    }).then(function (r) {
+      clearTimeout(timer);
+      return r;
+    }, function (e) {
+      clearTimeout(timer);
+      throw e;
     }).then(function (r) {
       if (!r.ok) throw Retryable('HTTP ' + r.status);
       return r.json().catch(function () { throw Retryable('Bad response'); });
@@ -108,6 +143,7 @@
 
   var Arc = {
     asError: asError,
+    timeouts: TIMEOUTS,
     NeedAuth: NeedAuth,
     getAuth: getAuth,
     token: token,
@@ -332,7 +368,7 @@
         fd.append('f', 'json');
         fd.append('token', t);
         fd.append('attachment', blob, name || 'photo.jpg');
-        return postJson(url + '/' + objectId + '/addAttachment', fd).catch(function (e) {
+        return postJson(url + '/' + objectId + '/addAttachment', fd, TIMEOUTS.upload).catch(function (e) {
           /* A fetch that rejects while streaming a stored Blob is not proof of a
              network problem: on iOS a Blob held in IndexedDB can go stale once
              the app has been killed, and reading it back fails the request in
@@ -447,6 +483,26 @@
       return Math.min(30 * 60000, 15000 * Math.pow(2, Math.max(0, attempts - 1)));
     },
 
+    /**
+     * A row left mid-flight belongs to nobody. iOS suspends the app during a
+     * slow upload and the drain never returns, so the row keeps the "uploading"
+     * it was given and no attempt, error or timer is ever written — it simply
+     * sits there looking busy. Hand those back to the queue at startup.
+     */
+    reclaimStranded: function () {
+      return g.Store.all().then(function (rows) {
+        var stuck = rows.filter(function (r) { return r.state === 'uploading'; });
+        return Promise.all(stuck.map(function (r) {
+          return g.Store.patch(r.id, {
+            state: 'pending',
+            netAttempts: (r.netAttempts || 0) + 1,
+            lastError: 'Interrupted — the app closed mid-upload',
+            nextAttemptAt: 0
+          });
+        })).then(function () { return stuck.length; });
+      }).catch(function () { return 0; });
+    },
+
     /** Anything held back purely by a retry timer becomes due again. */
     clearBackoff: function () {
       return g.Store.outstanding().then(function (items) {
@@ -500,7 +556,7 @@
               var e = asError(raw);
               var attempts = (item.attempts || 0) + 1;
               if (e.needAuth) summary.needAuth = true;
-              if (e.retryable) summary.offline = true;
+              if (e.retryable && !e.timeout) summary.offline = true;
               summary.failed++;
               return g.Store.patch(item.id, {
                 state: e.needAuth || e.retryable ? 'pending' : 'error',

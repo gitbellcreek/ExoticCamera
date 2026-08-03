@@ -1845,6 +1845,9 @@
         return refreshTagFields();
       }).then(pruneLocalCopies).then(function () {
         Report.flushHeld();               // anything that could not go last time
+        return Arc.reclaimStranded().then(function (n) {
+          if (n) Report.note('reclaimed stranded uploads', n);
+        });
       }).then(maybeHintInstall);
     }).catch(function (e) {
       var msg = errText(e);

@@ -35,7 +35,7 @@ const fetchWithRef = (url, init = {}) =>
 
 const sandbox = { self: null, console, fetch: fetchWithRef, FormData, Blob, URLSearchParams, crypto,
   TextEncoder, btoa, Date, Math, JSON, Promise, Error, String, Number, Object, Array, isFinite, parseInt,
-  setTimeout, location: { origin: 'http://127.0.0.1:8848' } };
+  setTimeout, clearTimeout, AbortController, location: { origin: 'http://127.0.0.1:8848' } };
 sandbox.self = sandbox;
 vm.createContext(sandbox);
 sandbox.Store = Store;

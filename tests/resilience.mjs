@@ -9,7 +9,7 @@ const ok = (m) => console.log('  ok  ', m);
 
 const NO_REJECT = Symbol('no-reject');
 
-function makeApp({ patchRejectsWith = NO_REJECT } = {}) {
+function makeApp({ patchRejectsWith = NO_REJECT, fetchImpl = null } = {}) {
   const kv = new Map(), queue = new Map(), photos = new Map();
   const Store = {
     uuid: () => crypto.randomUUID(),
@@ -31,7 +31,7 @@ function makeApp({ patchRejectsWith = NO_REJECT } = {}) {
     all: async () => [...queue.values()],
     outstanding: async () => [...queue.values()].filter(i => i.state !== 'sent'),
   };
-  const sandbox = { self: null, console, fetch, FormData, Blob, File, URLSearchParams, crypto, TextEncoder, btoa, Date, Math, JSON, Promise, Error, String, Number, Object, Array, isFinite, parseInt, setTimeout, screen: { width: 393, height: 852 }, navigator: { userAgent: 'test' }, location: { origin: 'https://x.github.io' } };
+  const sandbox = { self: null, console, fetch: fetchImpl || fetch, AbortController, FormData, Blob, File, URLSearchParams, crypto, TextEncoder, btoa, Date, Math, JSON, Promise, Error, String, Number, Object, Array, isFinite, parseInt, setTimeout, clearTimeout, screen: { width: 393, height: 852 }, navigator: { userAgent: 'test' }, location: { origin: 'https://x.github.io' } };
   sandbox.self = sandbox;
   vm.createContext(sandbox);
   sandbox.Store = Store;
@@ -200,6 +200,70 @@ console.log('\n== a photo whose bytes are gone must not be reported as uploaded'
   const s2 = await Arc.flush(() => {}, { force: true });
   if (queue.get(q2.id).state !== 'sent') fail('a genuine point-only record was blocked, state=' + queue.get(q2.id).state);
   else ok('a record that never had a photo still goes up (sent ' + s2.sent + ')');
+}
+
+/* The field bug: three photos owed, zero errors recorded, "waiting" forever.
+   The first attachment upload hung with no deadline, and because the queue
+   drains one at a time nothing behind it was ever attempted. */
+console.log('\n== an upload that hangs must time out, and must not block the queue');
+{
+  let attachTries = 0;
+  const stub = (url, opts) => {
+    if (String(url).includes('/addAttachment')) {
+      attachTries++;
+      // a half-open connection: it answers nothing, ever
+      return new Promise((_, reject) => {
+        if (opts && opts.signal) opts.signal.addEventListener('abort', () => reject(new Error('aborted')));
+      });
+    }
+    return fetch(url, opts);
+  };
+  const { Config, Arc, Store, queue } = makeApp({ fetchImpl: stub });
+  await Config.load();
+  Arc.timeouts.upload = 400;                       // 120s in the field, 0.4s here
+  await Store.set('auth', { mode: 'manual', token: TOK, expires: Date.now() + 3600e3 });
+
+  const a = photo(), b = photo();
+  b.createdAt = a.createdAt + 1;
+  for (const p of [a, b]) { await Store.add(p); await Store.patch(p.id, { objectId: 900001 }); }
+
+  const started = Date.now();
+  const summary = await Arc.flush(() => {}, { force: true });
+  const took = Date.now() - started;
+
+  if (took > 5000) fail('flush took ' + took + 'ms — the deadline did not fire');
+  else ok('a hung upload gives up after ' + took + 'ms instead of never');
+  if (attachTries !== 2) fail('expected both photos to be attempted, got ' + attachTries);
+  else ok('the photo behind it was still attempted — one slow upload no longer blocks the queue');
+  if (summary.offline) fail('a timeout was treated as being offline, which stops the drain');
+  else ok('a deadline is not mistaken for having no signal');
+  let clean = true;
+  for (const p of [a, b]) {
+    const row = queue.get(p.id);
+    const before = process.exitCode;
+    if (!/timed out/i.test(row.lastError || '')) fail('row recorded "' + row.lastError + '" instead of a timeout');
+    if (row.attempts) fail('a timeout must not count against the photo itself');
+    if (!row.netAttempts) fail('a timeout was not counted at all — this is the "waiting forever" bug');
+    if (process.exitCode !== before) clean = false;
+  }
+  if (clean) ok('both rows carry a visible timeout and a network-attempt count');
+}
+
+console.log('\n== a row stranded mid-upload is handed back to the queue');
+{
+  const { Config, Arc, Store, queue } = makeApp();
+  await Config.load();
+  const p = photo();
+  await Store.add(p);
+  await Store.patch(p.id, { state: 'uploading' });   // iOS suspended the app here
+  const n = await Arc.reclaimStranded();
+  const row = queue.get(p.id);
+  if (n !== 1) fail('expected one stranded row, got ' + n);
+  if (row.state !== 'pending') fail('stranded row left as "' + row.state + '"');
+  else ok('handed back as pending: ' + row.lastError);
+  if (!row.netAttempts) fail('the interruption was not counted');
+  if (await Arc.reclaimStranded() !== 0) fail('reclaiming twice found work the second time');
+  else ok('nothing to reclaim on a clean queue');
 }
 
 async function ids(url) {

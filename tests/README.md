@@ -45,7 +45,7 @@ writes to neither.
 | --- | :-: | --- |
 | `layers` | | Field mapping resolves correctly on both layers; Central stays the default; a queued photo keeps its own destination |
 | `e2e` | | Upload, attachment, resumable retry, invalid token, backoff curves, the airplane-mode photo that would not clear |
-| `resilience` | | A storage failure returning `null`/a string/a number must not become a second crash; problem reports round-trip; a refused report is held with its reason and goes up later; a photo whose bytes are gone is an error, not a silent success |
+| `resilience` | | A storage failure returning `null`/a string/a number must not become a second crash; problem reports round-trip; a refused report is held with its reason and goes up later; a photo whose bytes are gone is an error, not a silent success; a hung upload times out instead of blocking the queue; a row stranded mid-upload is reclaimed |
 | `edit-server` | | Editing a point already on the layer, in place, with no duplicate; a rejected edit is kept; over-long text is trimmed |
 | `ui` | ✓ | The main flow: capture, offline queueing, reconnect, live queue updates, layer picker, remove-from-layer |
 | `ios` | ✓ | The compass permission dance: asks on first touch, retries a refused call, works with no prompt when already granted |

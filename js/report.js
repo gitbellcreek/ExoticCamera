@@ -24,14 +24,22 @@
    */
   function post(attrs) {
     return g.Arc.token().then(function (t) {
+      // never wait forever: a report is the thing you reach for when the network
+      // is already misbehaving
+      var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 30000);
       return fetch(Report.tableUrl() + '/addFeatures', {
         method: 'POST',
+        signal: ctl ? ctl.signal : undefined,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           f: 'json', token: t,
           features: JSON.stringify([{ attributes: attrs }])
         })
-      }).catch(function () { throw new Error('the server could not be reached'); });
+      }).then(function (r) { clearTimeout(timer); return r; }, function () {
+        clearTimeout(timer);
+        throw new Error('the server could not be reached');
+      });
     }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status + ' from the report table');
       return r.json().catch(function () { throw new Error('the report table did not answer with JSON'); });

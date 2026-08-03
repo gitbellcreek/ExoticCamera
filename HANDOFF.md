@@ -75,6 +75,21 @@ bytes go to the attachment and the phone.
 with a syntax error — a black viewfinder with no message. Only navigations fall
 back to the shell.
 
+**Every request has a deadline, and a deadline is not the same as no signal.**
+`fetch` will sit on a half-open connection forever, and the queue drains one
+photo at a time — so a single hung attachment upload held up every photo behind
+it with nothing written back at all. The field symptom was three photos owed,
+`queueerrors: 0`, and rows reading *"waiting"* for hours. JSON calls get 30 s and
+an attachment 120 s (`Arc.timeouts`, which the tests shrink). A timeout is
+retryable, so it does not count against the photo, but unlike *network
+unreachable* it does **not** stop the drain: the connection answered, just
+slowly, and the photos behind it deserve their own attempt and their own error.
+
+**A row left in `uploading` belongs to nobody.** iOS suspends the app during a
+slow upload and the drain never returns, so the row keeps the state it was given
+and no attempt, error or timer is ever recorded — it just sits there looking
+busy. `Arc.reclaimStranded()` runs at startup and hands those back.
+
 **An upload that files the point and loses the photo must never be called a
 success.** The point goes up first, so a failed attachment leaves a point on the
 map with nothing behind it. Two things used to hide that: missing photo bytes

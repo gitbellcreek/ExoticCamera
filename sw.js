@@ -8,7 +8,7 @@ var BUILD = '__BUILD__';
 // directly, in which case BUILD is never stamped and this is the only thing that
 // forces a fresh, complete precache — a half-populated cache is what turns an
 // offline launch into a blank screen.
-var REV = 'r10';
+var REV = 'r11';
 var CACHE = 'exoticcam-' + BUILD + '-' + REV;
 
 var SHELL = [
