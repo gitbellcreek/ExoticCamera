@@ -1,11 +1,15 @@
 # Exotic Camera
 
 A small offline-first web camera for field work. Take a photo, and the app files it
-as a point in the **Exotics Camera Points** ArcGIS feature layer with the compass
-heading the camera was facing, the GPS fix, and the JPEG attached.
+as a point in an ArcGIS feature layer with the compass heading the camera was
+facing, the GPS fix, and the JPEG attached.
 
-No build step, no framework, no dependencies — about 60 KB of static files served
+No build step, no framework, no dependencies — about 100 KB of static files served
 from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
+
+Picking this up after a break? Start with **[HANDOFF.md](HANDOFF.md)**: how it
+deploys, why the awkward parts are the way they are, and what is still open.
+Tests are in **[tests/](tests/README.md)**.
 
 ## What it does
 
@@ -102,7 +106,7 @@ sheet is open, and it is the one part of this app with no bug table.
 
 ## Data written
 
-On the Exotics layer (Esri GNSS metadata schema, attachments enabled):
+On ELAPP All (Esri GNSS metadata schema, attachments enabled):
 
 | Captured | Field |
 | --- | --- |
@@ -140,18 +144,11 @@ report must never become a second bug.
 
 ## Working on it
 
-There are no unit tests; the checks that matter run against a browser and the live
-service, driven by Playwright from `node`. If you write your own, note the rule the
-existing ones follow: **a test may only delete features it created itself.** They
-snapshot the layer's OBJECTIDs at start, delete only the difference, refuse to
-delete more rows than the run could plausibly have made, and abort outright if
-the snapshot query returns anything unexpected rather than assuming an empty
-layer. A `where=1=1` delete here destroys real field data — with no undo, since
-neither service has sync or archiving enabled.
-
-Both shipped layers hold real data, so write tests point at a scratch layer
-entered by hand (which also exercises the custom-URL path); Central and ELAPP All
-are only ever read.
+There are no unit tests; the checks that matter run against a real browser and the
+live service. See **[tests/README.md](tests/README.md)** for how to run them and
+the one rule that matters: **a test may only delete features it created itself.**
+A `where=1=1` delete here destroys real field data, with no undo — neither service
+has sync or archiving enabled.
 
 ## Signing in
 
