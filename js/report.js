@@ -8,12 +8,63 @@
   var MAX_LOG = 40;
   var log = [];                      // recent breadcrumbs, newest last
 
+  var HELD_KEY = 'reportQueue';      // reports that could not be sent yet
+  var HELD_MAX = 20;
+  var HELD_TRIES = 10;               // then give up, so nothing retries forever
+
   function clip(s, n) {
     s = s === null || s === undefined ? '' : String(s);
     return s.length > n ? s.slice(0, n - 1) + '…' : s;
   }
 
+  /**
+   * Put one row in the table. Rejects with a message that says what actually
+   * went wrong — a permission refusal and a dead connection are different
+   * problems and the user is the one who has to act on the difference.
+   */
+  function post(attrs) {
+    return g.Arc.token().then(function (t) {
+      return fetch(Report.tableUrl() + '/addFeatures', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          f: 'json', token: t,
+          features: JSON.stringify([{ attributes: attrs }])
+        })
+      }).catch(function () { throw new Error('the server could not be reached'); });
+    }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status + ' from the report table');
+      return r.json().catch(function () { throw new Error('the report table did not answer with JSON'); });
+    }).then(function (j) {
+      if (j && j.error) {
+        throw new Error((j.error.message || 'error ' + j.error.code) +
+          (j.error.details && j.error.details.length ? ' — ' + j.error.details.join('; ') : ''));
+      }
+      var res = j && j.addResults && j.addResults[0];
+      if (!res || !res.success) {
+        throw new Error((res && res.error && res.error.description) || 'the report table refused the row');
+      }
+      return true;
+    });
+  }
+
+  /* A report that cannot go now is kept, not binned: the moment something is
+     wrong is exactly the moment the connection or the token is likely to be
+     wrong too, and a report that only exists while the app is healthy is no
+     use at all. Bounded in both directions so it can never grow unattended. */
+  function hold(attrs) {
+    return g.Store.get(HELD_KEY).then(function (held) {
+      held = (held || []).filter(function (h) { return h && h.attrs; });
+      held.push({ attrs: attrs, tries: 0 });
+      while (held.length > HELD_MAX) held.shift();
+      return g.Store.set(HELD_KEY, held);
+    }).catch(function () { /* storage is failing too; the report is simply lost */ });
+  }
+
   var Report = {
+    /** Why the last send failed, for the UI to show. Null once one succeeds. */
+    lastFailure: null,
+
     /** Remember something interesting. Kept in memory only until a report is sent. */
     note: function (what, extra) {
       log.push({
@@ -65,22 +116,50 @@
 
       return g.Arc.getAuth().then(function (a) {
         if (a && a.username) attrs.username = clip(a.username, 128);
-        return g.Arc.token();
-      }).then(function (t) {
-        return fetch(Report.tableUrl() + '/addFeatures', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            f: 'json', token: t,
-            features: JSON.stringify([{ attributes: attrs }])
-          })
+      }).catch(function () { /* no auth record: send it anonymously and find out why */ })
+        .then(function () { return post(attrs); })
+        .then(function () {
+          Report.lastFailure = null;
+          return true;
+        }).catch(function (e) {
+          Report.lastFailure = (e && e.message) || 'unknown error';
+          return hold(attrs).then(function () { return false; });
         });
-      }).then(function (r) { return r.json(); }).then(function (j) {
-        var res = j && j.addResults && j.addResults[0];
-        return !!(res && res.success);
-      }).catch(function () {
-        return false;                 // offline or signed out: the report is simply lost
-      });
+    },
+
+    /**
+     * Push anything that was held back. Safe to call often and from anywhere —
+     * it never throws, and it stops at the first failure rather than hammering
+     * a table that has just refused one.
+     */
+    flushHeld: function () {
+      return g.Store.get(HELD_KEY).then(function (held) {
+        held = (held || []).filter(function (h) { return h && h.attrs; });
+        if (!held.length) return 0;
+        var sent = 0, stopped = false;
+        return held.reduce(function (chain, h) {
+          return chain.then(function (keep) {
+            var tries = (h.tries || 0) + 1;
+            // one failure is enough to know the rest will fail the same way
+            if (stopped) return keep.concat([h]);
+            return post(h.attrs).then(function () {
+              sent++;
+              return keep;                              // sent: drop it from the list
+            }).catch(function (e) {
+              Report.lastFailure = (e && e.message) || 'unknown error';
+              stopped = true;
+              return tries >= HELD_TRIES ? keep : keep.concat([{ attrs: h.attrs, tries: tries }]);
+            });
+          });
+        }, Promise.resolve([])).then(function (keep) {
+          if (sent) Report.lastFailure = null;
+          return g.Store.set(HELD_KEY, keep).then(function () { return sent; });
+        });
+      }).catch(function () { return 0; });
+    },
+
+    heldCount: function () {
+      return g.Store.get(HELD_KEY).then(function (h) { return (h || []).length; }).catch(function () { return 0; });
     }
   };
 

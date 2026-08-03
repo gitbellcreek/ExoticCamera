@@ -113,6 +113,9 @@ console.log('\n== problem report round trip');
   const outcome = await Report.send({ kind: 'crash', summary: 'no auth' });
   if (outcome !== false) fail('signed-out report should resolve false, not throw');
   else ok('a report that cannot be sent resolves false instead of throwing');
+  if (!Report.lastFailure) fail('a failed report did not record why');
+  else ok('failure reason recorded: ' + Report.lastFailure);
+  await Store.set('reportQueue', []);            // that one was sent with no auth on purpose
 
   // opt-out is honoured for automatic reports, manual always goes
   await Store.set('auth', { mode: 'manual', token: TOK, expires: Date.now() + 3600e3 });
@@ -125,6 +128,78 @@ console.log('\n== problem report round trip');
     method: 'POST', body: new URLSearchParams({ f: 'json', token: TOK, objectIds: mine.join(',') }),
   });
   console.log('   cleanup:', JSON.stringify((await del.json()).deleteResults));
+}
+
+/* Tyler's report never arrived and nobody could say why: the old code binned a
+   report it could not send and blamed the token. */
+console.log('\n== a report that cannot be sent is held, and says why');
+{
+  const { Config, Store, Report } = makeApp();
+  await Config.load();
+  await Store.set('auth', { mode: 'manual', token: TOK, expires: Date.now() + 3600e3, username: 'james.robe.hc' });
+  const good = Config.get().bugsUrl;
+  const before = await ids(Report.tableUrl());
+
+  await Config.save({ bugsUrl: good.replace(/ExoticCameraBugs/, 'NoSuchTable_ExoticCamera') });
+  Report.note('boot', 'held-report test');
+  if (await Report.send({ kind: 'manual', summary: 'held report round trip' }) !== false) {
+    fail('a report to a table that does not exist reported success');
+  } else {
+    ok('refused report resolves false, reason: ' + Report.lastFailure);
+  }
+  if (/offline|signed out/i.test(Report.lastFailure || '')) fail('still guessing at the cause instead of quoting the table');
+  if ((await Report.heldCount()) !== 1) fail('the report was dropped instead of held');
+  else ok('held for a later attempt');
+
+  await Config.save({ bugsUrl: good });
+  const sent = await Report.flushHeld();
+  if (sent !== 1) fail('held report did not go up once the table was reachable, sent=' + sent);
+  else ok('held report went up on the next flush');
+  if ((await Report.heldCount()) !== 0) fail('a sent report was left in the hold queue');
+  else ok('hold queue emptied');
+  if (Report.lastFailure !== null) fail('lastFailure not cleared after a success');
+
+  const mine = [...await ids(Report.tableUrl())].filter(i => !before.has(i));
+  if (mine.length !== 1) { fail('expected exactly one new row, got ' + mine.length); process.exit(1); }
+  const a = (await q(Report.tableUrl(), mine)).features[0].attributes;
+  if (a.summary !== 'held report round trip') fail('the held report arrived with the wrong body: ' + a.summary);
+  else ok('the row that arrived is the one that was held');
+  const del = await fetch(Report.tableUrl() + '/deleteFeatures', {
+    method: 'POST', body: new URLSearchParams({ f: 'json', token: TOK, objectIds: mine.join(',') }),
+  });
+  console.log('   cleanup:', JSON.stringify((await del.json()).deleteResults));
+}
+
+/* Tyler's points landed on Central with no photos behind them and the app
+   chimed as though they had uploaded. Losing the bytes is bad; calling it a
+   success is worse, because nobody goes looking. */
+console.log('\n== a photo whose bytes are gone must not be reported as uploaded');
+{
+  const { Config, Arc, Store, queue } = makeApp();
+  await Config.load();
+  await Store.set('auth', { mode: 'manual', token: TOK, expires: Date.now() + 3600e3 });
+  const p = photo();
+  await Store.add(p);
+  // the point is already on the layer, so nothing here touches the service
+  await Store.patch(p.id, { objectId: 999999 });
+  await Store.dropPhoto(p.id);
+
+  const summary = await Arc.flush(() => {}, { force: true });
+  const row = queue.get(p.id);
+  if (summary.sent) fail('a photo with no bytes was counted as sent');
+  else ok('not counted as sent');
+  if (row.state !== 'error') fail('expected state "error", got "' + row.state + '"');
+  else ok('row left in error: ' + row.lastError);
+  if (row.attachmentId) fail('invented an attachment id');
+
+  // and a record that never had a photo is still allowed through
+  const q2 = photo();
+  delete q2.blob;
+  await Store.add(q2);
+  await Store.patch(q2.id, { objectId: 999998 });
+  const s2 = await Arc.flush(() => {}, { force: true });
+  if (queue.get(q2.id).state !== 'sent') fail('a genuine point-only record was blocked, state=' + queue.get(q2.id).state);
+  else ok('a record that never had a photo still goes up (sent ' + s2.sent + ')');
 }
 
 async function ids(url) {

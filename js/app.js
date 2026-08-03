@@ -1106,6 +1106,7 @@
       // connection's fault, not theirs
       Arc.clearBackoff().then(function () {
         if (Config.get().autoSync) sync(true);
+        Report.flushHeld();               // reports wait for a connection too
       });
     } else {
       Sound.offline();
@@ -1216,11 +1217,23 @@
       }
       list.innerHTML = rows.map(function (r) {
         var when = new Date(r.createdAt).toLocaleString();
+        // the point goes up before the photo, so "sent" without an attachment is
+        // a point on the map with nothing behind it — say so rather than imply
+        // the photo made it
+        var noPhoto = r.objectId && !r.attachmentId;
         var sub = r.pendingEdit ? 'edit waiting to go up'
-          : r.state === 'sent' ? 'uploaded · OBJECTID ' + (r.objectId || '?')
+          : r.state === 'sent' ? (noPhoto
+              ? 'OBJECTID ' + r.objectId + ' · filed without a photo'
+              : 'uploaded · OBJECTID ' + (r.objectId || '?'))
           : r.state === 'error' ? esc(r.lastError || 'failed')
           : r.state === 'uploading' ? 'uploading…'
-          : r.attempts ? 'retry ' + r.attempts + (r.lastError ? ' · ' + esc(r.lastError) : '') : 'waiting';
+          // A connection failure deliberately doesn't raise `attempts`, which used
+          // to mean a row failing every minute for hours still read "waiting"
+          // with no error at all. Count those too, or a stuck photo is invisible.
+          : (r.attempts || r.netAttempts)
+            ? 'retry ' + (r.attempts || r.netAttempts) + (r.lastError ? ' · ' + esc(r.lastError) : '')
+            : 'waiting';
+        if (noPhoto && r.state !== 'sent') sub = 'point filed, photo still owed · ' + sub;
         var where = r.layerName && r.layerName !== Config.layerName() ? ' → ' + esc(r.layerName) : '';
         if (r.source === 'import') where = ' · imported' + where;
         if (r.feature) where = ' · ' + esc(r.feature) + where;
@@ -1468,7 +1481,13 @@
       $('bug-send').disabled = false;
       closeSheets();
       if (okSent) { Sound.sent(); toast('Report sent — thank you', 'ok'); }
-      else { Sound.error(); toast('Could not send the report (offline or signed out)', 'bad', 4500); }
+      else {
+        // "offline or signed out" was a guess, and it was usually the wrong one.
+        // Say what the table actually said, and that the report is being kept.
+        Sound.error();
+        toast('Report held — ' + (Report.lastFailure || 'could not send it') +
+              '. It will go up on its own once that clears.', 'warn', 6000);
+      }
     });
   }
 
@@ -1824,7 +1843,9 @@
       return Store.get('sessionTag').then(function (t) {
         tag = { feature: (t && t.feature) || '', note: (t && t.note) || '' };
         return refreshTagFields();
-      }).then(pruneLocalCopies).then(maybeHintInstall);
+      }).then(pruneLocalCopies).then(function () {
+        Report.flushHeld();               // anything that could not go last time
+      }).then(maybeHintInstall);
     }).catch(function (e) {
       var msg = errText(e);
       toast('Startup problem: ' + msg, 'bad', 5000);

@@ -332,7 +332,17 @@
         fd.append('f', 'json');
         fd.append('token', t);
         fd.append('attachment', blob, name || 'photo.jpg');
-        return postJson(url + '/' + objectId + '/addAttachment', fd);
+        return postJson(url + '/' + objectId + '/addAttachment', fd).catch(function (e) {
+          /* A fetch that rejects while streaming a stored Blob is not proof of a
+             network problem: on iOS a Blob held in IndexedDB can go stale once
+             the app has been killed, and reading it back fails the request in
+             exactly the same way. Calling that "network unreachable" retries
+             forever against something no retry can fix, so ask the blob. */
+          if (!e || !e.retryable) throw e;
+          return blob.arrayBuffer().then(function () { throw e; }, function () {
+            throw new Error('The photo could not be read back from this device — its local copy is gone');
+          });
+        });
       }).then(function (j) {
         var res = j.addAttachmentResult;
         if (!res || !res.success) {
@@ -360,7 +370,16 @@
       return step.then(function (oid) {
         if (item.attachmentId) return item.attachmentId;
         return g.Store.photo(item.id).then(function (blob) {
-          if (!blob) return null;                          // point-only record
+          if (!blob) {
+            /* A photo that was queued with bytes and no longer has them is a lost
+               photo, not a finished upload. Marking it sent here files a point
+               with nothing attached and chimes as though it worked — which is
+               how a whole afternoon of shots can look fine and be empty. */
+            if (item.hasPhoto) {
+              throw new Error('The photo is no longer on this device — the point was filed without it');
+            }
+            return null;                                   // genuinely a point-only record
+          }
           return Arc.addAttachment(oid, blob,
             item.filename || ('photo_' + item.id.slice(0, 8) + '.jpg'), Arc.targetUrl(item));
         });

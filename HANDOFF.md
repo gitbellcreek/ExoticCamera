@@ -75,6 +75,21 @@ bytes go to the attachment and the phone.
 with a syntax error — a black viewfinder with no message. Only navigations fall
 back to the shell.
 
+**An upload that files the point and loses the photo must never be called a
+success.** The point goes up first, so a failed attachment leaves a point on the
+map with nothing behind it. Two things used to hide that: missing photo bytes
+were treated as a legitimate "point-only record" and the row was marked sent
+with a success chime, and a `fetch` that rejected while streaming a stored Blob
+was always blamed on the network — which does not raise the attempt count and
+caps the retry at a minute, so the row read *"waiting"* forever with no error
+text. On iOS a Blob held in IndexedDB can go stale after the app is killed and
+fail its request in exactly that way. Now the bytes are checked, an unreadable
+photo says so, and the queue counts network retries too.
+
+**A problem report that cannot be sent is held, not binned.** It also quotes the
+error instead of guessing "offline or signed out" — that guess sent us looking
+at the token when the table itself was refusing the row.
+
 **Anything can end up in a `catch`.** IndexedDB rejects with `null` in some
 failure paths; the first property access then throws a second, meaningless error.
 `Arc.asError()` normalises before anything touches a property. Use it.

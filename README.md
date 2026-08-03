@@ -139,8 +139,13 @@ turns that off, while the menu item always sends. No photos are ever included.
 The table's fields were created for this purpose: `reported`, `kind`, `summary`,
 `note`, `details` (JSON breadcrumbs + stack), `appbuild`, `layername`,
 `username`, `device`, `sensors`, `queued`, `queueerrors`, `online`, `applat`,
-`applon`. A report that cannot be sent is dropped silently — a failing bug
-report must never become a second bug.
+`applon`. A report that cannot be sent is **held on the device and retried** —
+the moment something is wrong is exactly the moment the connection or the token
+is likely to be wrong too, so a report that only survives while the app is
+healthy is no use. Up to twenty are kept, each tried ten times before it is
+given up on, and the app now shows what the table actually said rather than
+guessing at "offline or signed out". Sending still never throws: a failing bug
+report must not become a second bug.
 
 ## Working on it
 
