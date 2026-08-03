@@ -47,7 +47,7 @@
     // Exotics name the same things differently.
     fields: {
       heading: '', lat: '', lon: '', altitude: '', accuracy: '', vaccuracy: '',
-      speed: '', course: '', captured: '', device: '', notes: '', filename: ''
+      speed: '', course: '', captured: '', device: '', notes: '', filename: '', feature: ''
     }
   };
 
@@ -55,6 +55,7 @@
   var CANDIDATES = {
     heading:   ['esrisnsr_azimuth', 'azimuth', 'heading', 'bearing', 'direction', 'camera_heading', 'cameradir', 'compass'],
     filename:  ['filename', 'file_name', 'photo', 'photoname', 'image', 'imagename'],
+    feature:   ['feature', 'feature_type', 'featuretype', 'featurename', 'species', 'habitat', 'category', 'type'],
     lat:       ['esrignss_latitude', 'latitude', 'lat', 'y'],
     lon:       ['esrignss_longitude', 'longitude', 'long', 'lon', 'x'],
     altitude:  ['esrignss_altitude', 'altitude', 'elevation', 'elev', 'alt', 'z'],

@@ -33,6 +33,13 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
   the camera roll by itself, so this is the only route; per-shot sharing is available
   as a setting but off by default, since a sheet after every frame interrupts
   shooting.
+- **A session tag.** A small speech bubble under the compass opens a card where
+  you set a feature and/or a note once; every photo taken after that carries it
+  until you change or clear it. Which boxes appear, what they are called and how
+  long they may be all come from the target layer — Central offers a Note of 2560
+  characters, ELAPP All a Feature and Notes of 256 each — and a layer with neither
+  field says so rather than dropping the tag quietly. The card only animates
+  opacity and transform, so opening it never disturbs the viewfinder.
 - **Photos already on the phone** can be added from the queue or from Settings.
   Each one's own EXIF is read: position, altitude, the camera's position error,
   the capture time, and `GPSImgDirection` where the camera recorded a compass

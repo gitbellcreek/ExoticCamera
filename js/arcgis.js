@@ -276,6 +276,7 @@
       set('captured', item.createdAt);
       set('device', item.device);
       set('notes', item.notes);
+      set('feature', item.feature);
       set('filename', item.filename);
       if (map.positionSource) attrs[map.positionSource.name] = 2;     // integrated system location provider
 

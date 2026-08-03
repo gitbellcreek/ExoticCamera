@@ -599,6 +599,7 @@
       layerName: Config.layerName(),
       state: 'pending'
     };
+    applyTag(item);
     item.filename = photoName(item);
     if (item.heading === null || item.heading === undefined) {
       toast('Saved without a heading — compass not available', 'warn', 4000);
@@ -735,6 +736,121 @@
     f.classList.add('go');
   }
 
+  /* ─────────────────── the session tag ─────────────────────────────
+     A feature name and/or note that rides along with every photo until it is
+     changed or cleared. Which inputs appear, and how long they may be, come
+     from the target layer's own schema. */
+
+  var tag = { feature: '', note: '' };
+  var tagFields = { feature: null, notes: null };
+  var tagSaveTimer = null;
+
+  function tagFieldInfo(f) {
+    return f ? { name: f.name, alias: f.alias || f.name, length: f.length || 255 } : null;
+  }
+
+  function refreshTagFields() {
+    return Arc.layerMeta().then(function (meta) {
+      var map = Arc.resolveFields(meta);
+      tagFields.feature = tagFieldInfo(map.feature);
+      tagFields.notes = tagFieldInfo(map.notes);
+    }).catch(function () {
+      // never seen this layer's schema: offer both, at a length both layers allow
+      tagFields.feature = tagFields.feature || { name: 'feature', alias: 'Feature', length: 255 };
+      tagFields.notes = tagFields.notes || { name: 'notes', alias: 'Note', length: 255 };
+    }).then(applyTagFields);
+  }
+
+  function applyTagFields() {
+    var f = tagFields.feature, n = tagFields.notes;
+    var stranded = !f && !n && !!(tag.feature || tag.note);
+    $('tag-feature-wrap').classList.toggle('hidden', !f);
+    $('tag-note-wrap').classList.toggle('hidden', !n);
+    // hide the button on a layer with nowhere to put a tag — unless one is
+    // already set, in which case say so rather than drop it silently
+    $('tagger').classList.toggle('hidden', !f && !n && !stranded);
+    $('tagger').classList.toggle('stranded', stranded);
+
+    if (f) {
+      $('tag-feature-name').textContent = f.alias;
+      $('tag-feature').maxLength = f.length;
+      if (tag.feature.length > f.length) tag.feature = tag.feature.slice(0, f.length);
+      $('tag-feature').value = tag.feature;
+    }
+    if (n) {
+      $('tag-note-name').textContent = n.alias;
+      $('tag-note').maxLength = n.length;
+      if (tag.note.length > n.length) tag.note = tag.note.slice(0, n.length);
+      $('tag-note').value = tag.note;
+    }
+    $('tag-hint').textContent = (!f && !n)
+      ? Config.layerName() + ' has no Feature or Note field, so this tag will not be written there.'
+      : 'Goes on every photo sent to ' + Config.layerName() + ' until cleared.';
+    countTag();
+    renderTag();
+  }
+
+  function countTag() {
+    [['tag-feature', 'tag-feature-count', tagFields.feature],
+     ['tag-note', 'tag-note-count', tagFields.notes]].forEach(function (t) {
+      if (!t[2]) return;
+      var el = $(t[0]), out = $(t[1]);
+      out.textContent = el.value.length + '/' + t[2].length;
+      out.classList.toggle('full', el.value.length >= t[2].length);
+    });
+  }
+
+  function renderTag() {
+    var text = tag.feature || tag.note;
+    $('tagger').classList.toggle('set', !!text);
+    $('tag-label').textContent = text || 'Tag';
+    $('tag-toggle').setAttribute('title', text ? 'Tagging every photo: ' + text : 'Tag these photos');
+  }
+
+  function saveTag() {
+    clearTimeout(tagSaveTimer);
+    tagSaveTimer = setTimeout(function () {
+      Store.set('sessionTag', tag);
+    }, 300);
+  }
+
+  function readTagInputs() {
+    tag.feature = tagFields.feature ? $('tag-feature').value : tag.feature;
+    tag.note = tagFields.notes ? $('tag-note').value : tag.note;
+    countTag();
+    renderTag();
+    saveTag();
+  }
+
+  function openTag(open) {
+    var el = $('tagger');
+    var isOpen = open === undefined ? !el.classList.contains('open') : open;
+    el.classList.toggle('open', isOpen);
+    $('tag-toggle').setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+    if (isOpen) {
+      var first = tagFields.feature ? $('tag-feature') : $('tag-note');
+      setTimeout(function () { first.focus(); }, 60);
+    }
+  }
+
+  function clearTag() {
+    tag = { feature: '', note: '' };
+    $('tag-feature').value = '';
+    $('tag-note').value = '';
+    countTag();
+    renderTag();
+    Store.set('sessionTag', tag);
+    Sound.tick();
+    toast('Tag cleared', 'ok', 1600);
+  }
+
+  /** Stamp the current tag onto a photo about to be queued. */
+  function applyTag(item) {
+    if (tag.feature) item.feature = tag.feature;
+    if (tag.note) item.notes = tag.note;
+    return item;
+  }
+
   /* ────────────────── importing photos already on the phone ────────── */
 
   /** Decode with the camera's own orientation applied, then re-encode to size. */
@@ -790,6 +906,7 @@
             layerName: Config.layerName(),
             state: 'pending'
           };
+          applyTag(item);
           item.filename = photoName(item);
           return Exif.write(img.blob, exifMeta(item)).then(function (stamped) {
             item.blob = stamped;
@@ -993,6 +1110,7 @@
           : r.attempts ? 'retry ' + r.attempts + (r.lastError ? ' · ' + esc(r.lastError) : '') : 'waiting';
         var where = r.layerName && r.layerName !== Config.layerName() ? ' → ' + esc(r.layerName) : '';
         if (r.source === 'import') where = ' · imported' + where;
+        if (r.feature) where = ' · ' + esc(r.feature) + where;
         return '<div class="qrow ' + r.state + '">' +
           '<div class="qthumb" style="background-image:url(' + (r.thumb || '') + ')"></div>' +
           '<div class="qmeta"><b>' + esc(when) + '</b>' +
@@ -1075,7 +1193,9 @@
           renderLayerPicker();
           closeSheets();
           toast('Photos now go to ' + Config.layerName(), 'ok');
-          return Arc.layerMeta(true).catch(function () { /* offline: resolved on upload */ });
+          return Arc.layerMeta(true)
+            .catch(function () { /* offline: resolved on upload */ })
+            .then(refreshTagFields);
         });
       });
     });
@@ -1147,6 +1267,7 @@
       Sound.setEnabled(c.sound);
       Sound.tick();
       renderLayerPicker();
+      refreshTagFields();
       toast('Settings saved — photos go to ' + Config.layerName(), 'ok');
       closeSheets();
     });
@@ -1354,6 +1475,21 @@
       else toast('Heading ' + Math.round(state.heading) + '° (' + (state.headingSource === 'gps' ? 'GPS course' : 'magnetometer') + ')');
     });
 
+    $('tag-toggle').addEventListener('click', function (e) {
+      e.stopPropagation();
+      Sound.unlock();
+      openTag();
+    });
+    $('tag-feature').addEventListener('input', readTagInputs);
+    $('tag-note').addEventListener('input', readTagInputs);
+    $('tag-feature').addEventListener('keydown', function (e) { if (e.key === 'Enter') openTag(false); });
+    $('tag-clear').addEventListener('click', function (e) { e.stopPropagation(); clearTag(); openTag(false); });
+    $('tag-done').addEventListener('click', function (e) { e.stopPropagation(); readTagInputs(); openTag(false); });
+    $('tag-card').addEventListener('click', function (e) { e.stopPropagation(); });
+    document.addEventListener('click', function () {
+      if ($('tagger').classList.contains('open')) { readTagInputs(); openTag(false); }
+    });
+
     $('menu-btn').addEventListener('click', function () {
       Sound.unlock(); Sound.tick();
       renderLayerPicker();
@@ -1461,7 +1597,9 @@
         Sound.sent();
         toast('Signed in', 'ok');
         closeSheets();
-        return renderAuth().then(function () { return sync(); });
+        // the layer's schema only becomes readable once signed in, so the tag
+        // card can finally take its real field names and limits
+        return renderAuth().then(refreshTagFields).then(function () { return sync(); });
       }).catch(function (e) {
         Sound.error();
         toast(errText(e), 'bad', 4000);
@@ -1474,7 +1612,9 @@
         $('si-token').value = '';
         toast('Token stored', 'ok');
         closeSheets();
-        return renderAuth().then(function () { return sync(); });
+        // the layer's schema only becomes readable once signed in, so the tag
+        // card can finally take its real field names and limits
+        return renderAuth().then(refreshTagFields).then(function () { return sync(); });
       });
     });
     $('si-close').addEventListener('click', closeSheets);
@@ -1483,7 +1623,10 @@
       if (e.target.classList.contains('sheet')) closeSheets();
     });
     window.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape') return closeSheets();
+      if (e.key === 'Escape') {
+        if ($('tagger').classList.contains('open')) return openTag(false);
+        return closeSheets();
+      }
       if (sheetOpen('snake-panel')) Snake.keydown(e);
     });
 
@@ -1557,7 +1700,10 @@
     }).then(function (rows) {
       if (rows.length && rows[0].thumb) $('last-shot').style.backgroundImage = 'url(' + rows[0].thumb + ')';
       if (state.online && state.counts.outstanding && Config.get().autoSync) sync();
-      return pruneLocalCopies().then(maybeHintInstall);
+      return Store.get('sessionTag').then(function (t) {
+        tag = { feature: (t && t.feature) || '', note: (t && t.note) || '' };
+        return refreshTagFields();
+      }).then(pruneLocalCopies).then(maybeHintInstall);
     }).catch(function (e) {
       var msg = errText(e);
       toast('Startup problem: ' + msg, 'bad', 5000);

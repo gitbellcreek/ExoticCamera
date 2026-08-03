@@ -135,6 +135,60 @@ body.syncing #topbar::after {
 .thumb.pop { animation: pop .4s ease-out; }
 @keyframes pop { 0% { transform: scale(.7); } 60% { transform: scale(1.08); } 100% { transform: scale(1); } }
 
+/* ── session tag ────────────────────────────────────────────────
+   A small speech bubble under the compass. The card is always in the DOM and
+   only ever animates opacity and transform, so opening it costs nothing but a
+   composite — no layout, no reflow of the viewfinder. */
+#tagger { position: fixed; left: 12px; top: calc(var(--safe-t) + 122px); z-index: 35; }
+
+#tag-toggle {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 62vw;
+  padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line);
+  background: #0e131cd9; color: var(--dim); font: inherit; font-size: 12px; font-weight: 600;
+  backdrop-filter: blur(6px);
+}
+#tag-toggle svg { width: 15px; height: 12px; fill: currentColor; flex: none; }
+#tag-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#tagger.set #tag-toggle { color: #cfe0ff; border-color: #2a6df0; background: #16233cdd; }
+#tagger.stranded #tag-toggle { color: var(--warn); border-color: #7a6524; }
+
+#tag-card {
+  position: absolute; top: calc(100% + 8px); left: 0;
+  width: min(280px, calc(100vw - 24px));
+  padding: 12px 14px 14px; border-radius: 14px;
+  background: var(--panel); border: 1px solid var(--line);
+  box-shadow: 0 10px 30px #000a;
+  opacity: 0; transform: translateY(-6px) scale(.97); transform-origin: 20px top;
+  visibility: hidden; pointer-events: none;
+  transition: opacity .16s ease, transform .16s ease, visibility 0s linear .16s;
+  will-change: opacity, transform;
+}
+#tagger.open #tag-card {
+  opacity: 1; transform: none; visibility: visible; pointer-events: auto;
+  transition: opacity .16s ease, transform .16s ease;
+}
+/* the little tail, so it reads as a speech bubble */
+#tag-card::before {
+  content: ''; position: absolute; top: -6px; left: 16px; width: 10px; height: 10px;
+  background: var(--panel); border-left: 1px solid var(--line); border-top: 1px solid var(--line);
+  transform: rotate(45deg);
+}
+#tag-card .fld { margin: 6px 0; }
+#tag-card textarea {
+  width: 100%; padding: 9px 10px; border-radius: 10px; resize: none;
+  border: 1px solid var(--line); background: #0d131d; color: var(--txt); font: inherit; font-size: 14px;
+}
+#tag-card .fld > span { display: flex; justify-content: space-between; align-items: baseline; }
+#tag-card em { font-style: normal; font-variant-numeric: tabular-nums; font-size: 11px; opacity: .7; }
+#tag-card em.full { color: var(--warn); }
+#tag-card .row { margin-top: 10px; }
+#tag-hint { margin: 6px 0 0; }
+
+@media (orientation: landscape) and (max-height: 560px) {
+  #tagger { top: calc(var(--safe-t) + 96px); }
+  #tag-card { width: min(260px, calc(100vw - 120px)); }
+}
+
 /* ── toasts ─────────────────────────────────────────────────── */
 #toasts {
   position: fixed; left: 0; right: 0; bottom: calc(var(--safe-b) + 118px);
