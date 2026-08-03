@@ -110,6 +110,37 @@
       return tx('kv', 'readwrite', function (s) { s.delete(k); });
     },
 
+    /**
+     * Take a short-lived lock, read and written in one transaction so two
+     * contexts cannot both win. The page and the service worker can otherwise
+     * drain the queue at the same time and clobber each other's writes.
+     */
+    takeLock: function (key, ttlMs, owner) {
+      return open().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var t = db.transaction('kv', 'readwrite');
+          var s = t.objectStore('kv');
+          var got = false;
+          s.get(key).onsuccess = function (e) {
+            var cur = e.target.result && e.target.result.v;
+            if (cur && cur.until > Date.now() && cur.owner !== owner) return;   // someone else has it
+            got = true;
+            s.put({ k: key, v: { owner: owner, until: Date.now() + ttlMs } });
+          };
+          t.oncomplete = function () { resolve(got); };
+          t.onerror = function () { resolve(false); };      // never block work on the lock
+          t.onabort = function () { resolve(false); };
+        });
+      }).catch(function () { return true; });
+    },
+
+    releaseLock: function (key, owner) {
+      return Store.get(key).then(function (cur) {
+        if (cur && cur.owner !== owner) return null;
+        return Store.del(key);
+      }).catch(function () { return null; });
+    },
+
     /* ---- photos: bytes only, written once and never rewritten ---- */
     photo: function (id) {
       return open().then(function (db) {
@@ -200,10 +231,11 @@
       });
     },
 
-    /** Everything still owed to the server, oldest first. */
+    /** Everything still owed to the server, oldest first — including edits made
+        to photos that are already up there. */
     outstanding: function () {
       return Store.all().then(function (rows) {
-        return rows.filter(function (r) { return r.state !== 'sent'; })
+        return rows.filter(function (r) { return r.state !== 'sent' || r.pendingEdit; })
                    .sort(function (a, b) { return a.createdAt - b.createdAt; });
       });
     },
@@ -222,9 +254,12 @@
 
     counts: function () {
       return Store.all().then(function (rows) {
-        var c = { total: rows.length, pending: 0, uploading: 0, error: 0, sent: 0 };
-        rows.forEach(function (r) { if (c[r.state] !== undefined) c[r.state]++; });
-        c.outstanding = c.pending + c.uploading + c.error;
+        var c = { total: rows.length, pending: 0, uploading: 0, error: 0, sent: 0, edits: 0 };
+        rows.forEach(function (r) {
+          if (c[r.state] !== undefined) c[r.state]++;
+          if (r.state === 'sent' && r.pendingEdit) c.edits++;
+        });
+        c.outstanding = c.pending + c.uploading + c.error + c.edits;
         return c;
       });
     }

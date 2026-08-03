@@ -8,7 +8,7 @@ var BUILD = '__BUILD__';
 // directly, in which case BUILD is never stamped and this is the only thing that
 // forces a fresh, complete precache — a half-populated cache is what turns an
 // offline launch into a blank screen.
-var REV = 'r8';
+var REV = 'r9';
 var CACHE = 'exoticcam-' + BUILD + '-' + REV;
 
 var SHELL = [
@@ -112,7 +112,23 @@ function loadModules() {
   return modulesLoaded;
 }
 
+/**
+ * Background draining is for when the app is closed. If a window is open it is
+ * already draining, and two drainers on one queue clobber each other's writes —
+ * one context can finish an upload while the other is still holding a stale copy
+ * of the same row. Hand it to the page instead.
+ */
 function drain() {
+  return self.clients.matchAll({ includeUncontrolled: true, type: 'window' }).then(function (cs) {
+    if (cs.length) {
+      cs.forEach(function (c) { c.postMessage({ type: 'flush' }); });
+      return null;
+    }
+    return drainHere();
+  });
+}
+
+function drainHere() {
   if (!loadModules()) return Promise.resolve(null);
   return self.Config.load().then(function () {
     return self.Arc.flush(function () {});

@@ -244,6 +244,16 @@
       return map;
     },
 
+    /** Coerce a value to what a field will actually accept. */
+    clipTo: function (value, f) {
+      if (!f || value === null || value === undefined) return null;
+      if (f.type === 'esriFieldTypeString') {
+        var str = String(value);
+        return f.length ? str.slice(0, f.length) : str;
+      }
+      return value;
+    },
+
     /** Shape a queue item into an ArcGIS feature for this layer. */
     buildFeature: function (item, meta) {
       var map = Arc.resolveFields(meta);
@@ -334,6 +344,16 @@
 
     /** Push one queued photo. Resumes at whichever half is still missing. */
     uploadItem: function (item) {
+      // pendingEdit is only ever set on a photo that is already up there. Do not
+      // test state here: the drain loop marks the row "uploading" first, so a
+      // state check would miss the edit and quietly mark it done instead.
+      if (item.pendingEdit && item.objectId) {
+        return Arc.updateFeature(item).then(function () {
+          return g.Store.patch(item.id, {
+            state: 'sent', pendingEdit: false, lastError: null, attempts: 0
+          });
+        });
+      }
       var step = item.objectId ? Promise.resolve(item.objectId) : Arc.addFeature(item).then(function (oid) {
         return g.Store.patch(item.id, { objectId: oid }).then(function () { return oid; });
       });
@@ -350,6 +370,34 @@
         return g.Store.patch(item.id, {
           state: 'sent', attachmentId: aid, sentAt: Date.now(), lastError: null
         });
+      });
+    },
+
+    /**
+     * Change the text fields on a photo that is already on the layer. Only the
+     * attributes are sent — the point and its attachment stay untouched.
+     */
+    updateFeature: function (item) {
+      if (!item || !item.objectId) return Promise.resolve(false);
+      var url = Arc.targetUrl(item);
+      return Promise.all([token(), Arc.layerMeta(false, url)]).then(function (r) {
+        var meta = r[1];
+        var map = Arc.resolveFields(meta);
+        var attrs = {};
+        attrs[meta.objectIdField || 'OBJECTID'] = item.objectId;
+        if (map.feature) attrs[map.feature.name] = Arc.clipTo(item.feature || '', map.feature);
+        if (map.notes) attrs[map.notes.name] = Arc.clipTo(item.notes || '', map.notes);
+        if (!map.feature && !map.notes) return { skip: true };
+        return postJson(url + '/updateFeatures', {
+          f: 'json', token: r[0], features: JSON.stringify([{ attributes: attrs }])
+        });
+      }).then(function (j) {
+        if (j && j.skip) return false;
+        var res = (j.updateResults || [])[0];
+        if (!res || !res.success) {
+          throw new Error((res && res.error && res.error.description) || 'The layer refused the edit');
+        }
+        return true;
       });
     },
 
@@ -396,8 +444,21 @@
     flush: function (onEvent, opts) {
       opts = opts || {};
       var ev = onEvent || function () {};
-      var summary = { sent: 0, failed: 0, skipped: 0, needAuth: false, offline: false };
+      var summary = { sent: 0, failed: 0, skipped: 0, needAuth: false, offline: false, locked: false };
+      var me = (g.Store.uuid && g.Store.uuid()) || String(Date.now());
 
+      // one drainer at a time: the page and the service worker share this queue
+      return g.Store.takeLock('flushLock', 120000, me).then(function (got) {
+        if (!got) { summary.locked = true; return summary; }
+        return Arc._drain(ev, opts, summary).then(function (r) {
+          return g.Store.releaseLock('flushLock', me).then(function () { return r; });
+        }).catch(function (e) {
+          return g.Store.releaseLock('flushLock', me).then(function () { throw e; });
+        });
+      });
+    },
+
+    _drain: function (ev, opts, summary) {
       return g.Config.load().then(g.Store.outstanding).then(function (items) {
         var due = items.filter(function (i) {
           return opts.force || !i.nextAttemptAt || i.nextAttemptAt <= Date.now();

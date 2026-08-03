@@ -47,9 +47,11 @@ from GitHub Pages, so it opens fast on a phone and keeps working with no signal.
   are skipped and counted, since there is nothing to map them to. Works with what
   iOS and Android hand over from the picker — the EXIF block is read the same way
   whether it arrives as JPEG or HEIC.
-- **Changed your mind?** While a photo is still in the queue, the queue view can
-  delete it from the layer again (⌫). Once the queue is cleared, that has to be done
-  in ArcGIS.
+- **Changed your mind?** While a photo is still in the queue you can edit its
+  feature and note (✎) or delete it from the layer entirely (⌫). Editing a photo
+  that is already up updates that point in place — no duplicate — and an edit made
+  with no signal is held and pushed like any other work owed to the server. Once
+  the queue is cleared, both have to be done in ArcGIS.
 - **The viewfinder shows the whole frame** that will be captured, letterboxed, rather
   than a cropped preview of a wider photo.
 - **A frozen preview fixes itself.** iOS can suspend the capture session — a call,
@@ -218,6 +220,11 @@ The GPS readout reflects what is actually held, not the last callback: a
 geolocation `TIMEOUT` is routine on iOS and says nothing about the fix already in
 hand, so the chip keeps showing it, ages it, and only says *no fix* when there
 genuinely isn't one.
+
+Only one context drains the queue at a time. The service worker hands the job to
+an open window rather than racing it — two drainers on one queue clobber each
+other, one finishing an upload while the other still holds a stale copy of the
+same row — and a short lock in the key/value store backs that up.
 
 Retries distinguish *no signal* from *the server said no*: a connection failure
 does not raise the attempt count and caps its wait at a minute, and reconnecting

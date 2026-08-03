@@ -212,6 +212,31 @@
   </div>
 </div>
 
+<!-- ── edit one queued photo ─────────────────────────────────── -->
+<div id="edit-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Edit photo">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Edit photo</h2>
+    <div class="edit-head">
+      <div class="qthumb" id="edit-thumb"></div>
+      <div class="qmeta" id="edit-meta"></div>
+    </div>
+    <label class="fld" id="edit-feature-wrap">
+      <span><b id="edit-feature-name">Feature</b> <em id="edit-feature-count"></em></span>
+      <input type="text" id="edit-feature" enterkeyhint="done">
+    </label>
+    <label class="fld" id="edit-note-wrap">
+      <span><b id="edit-note-name">Note</b> <em id="edit-note-count"></em></span>
+      <textarea id="edit-note" rows="3"></textarea>
+    </label>
+    <p class="hint" id="edit-hint"></p>
+    <div class="row">
+      <button class="btn" id="edit-save">Save</button>
+      <button class="btn ghost" id="edit-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
 <!-- ── import progress ───────────────────────────────────────── -->
 <div id="import-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Adding photos">
   <div class="sheet-inner">

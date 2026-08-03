@@ -736,6 +736,100 @@
     f.classList.add('go');
   }
 
+  /* ──────────────── editing a photo already in the queue ───────────
+     Changing a note after the fact is normal field work. If the photo has not
+     gone up yet the edit simply rides along; if it has, the change is pushed to
+     the layer — and if that cannot happen now, it is queued like any other work
+     owed to the server. */
+
+  var editing = null, editFields = { feature: null, notes: null };
+
+  function openEditor(id) {
+    return Store.item(id).then(function (item) {
+      if (!item) return;
+      editing = item;
+      $('edit-thumb').style.backgroundImage = item.thumb ? 'url(' + item.thumb + ')' : '';
+      $('edit-meta').innerHTML = '<b>' + esc(new Date(item.createdAt).toLocaleString()) + '</b>' +
+        '<span>' + (item.heading === null || item.heading === undefined ? 'no heading' : Math.round(item.heading) + '°') +
+        ' · ' + esc(item.layerName || Config.layerName()) +
+        (item.state === 'sent' ? ' · OBJECTID ' + item.objectId : ' · not uploaded yet') + '</span>';
+
+      return Arc.layerMeta(false, Arc.targetUrl(item)).then(function (meta) {
+        var map = Arc.resolveFields(meta);
+        editFields.feature = tagFieldInfo(map.feature);
+        editFields.notes = tagFieldInfo(map.notes);
+      }).catch(function () {
+        editFields.feature = { name: 'feature', alias: 'Feature', length: 255 };
+        editFields.notes = { name: 'notes', alias: 'Note', length: 255 };
+      }).then(function () {
+        var f = editFields.feature, n = editFields.notes;
+        $('edit-feature-wrap').classList.toggle('hidden', !f);
+        $('edit-note-wrap').classList.toggle('hidden', !n);
+        if (f) {
+          $('edit-feature-name').textContent = f.alias;
+          $('edit-feature').maxLength = f.length;
+          $('edit-feature').value = item.feature || '';
+        }
+        if (n) {
+          $('edit-note-name').textContent = n.alias;
+          $('edit-note').maxLength = n.length;
+          $('edit-note').value = item.notes || '';
+        }
+        $('edit-hint').textContent = !f && !n
+          ? 'This layer has no Feature or Note field, so there is nothing to edit here.'
+          : item.state === 'sent'
+            ? 'Saving updates the point already on the layer.'
+            : 'Saving updates the photo before it goes up.';
+        $('edit-save').disabled = !f && !n;
+        countEdit();
+        openSheet('edit-panel');
+      });
+    });
+  }
+
+  function backToQueue() {
+    return renderQueue().then(function () { openSheet('queue-panel'); });
+  }
+
+  function countEdit() {
+    [['edit-feature', 'edit-feature-count', editFields.feature],
+     ['edit-note', 'edit-note-count', editFields.notes]].forEach(function (t) {
+      if (!t[2]) return;
+      var el = $(t[0]), out = $(t[1]);
+      out.textContent = el.value.length + '/' + t[2].length;
+      out.classList.toggle('full', el.value.length >= t[2].length);
+    });
+  }
+
+  function saveEdit() {
+    if (!editing) return Promise.resolve();
+    var item = editing;
+    var patch = {};
+    if (editFields.feature) patch.feature = $('edit-feature').value.trim();
+    if (editFields.notes) patch.notes = $('edit-note').value.trim();
+
+    var unchanged = (patch.feature === undefined || patch.feature === (item.feature || '')) &&
+                    (patch.notes === undefined || patch.notes === (item.notes || ''));
+    if (unchanged) { closeSheets(); return Promise.resolve(); }
+
+    if (item.state === 'sent') patch.pendingEdit = true;
+    $('edit-save').disabled = true;
+
+    return Store.patch(item.id, patch).then(function () {
+      Report.note('edited', { id: item.id.slice(0, 8), sent: item.state === 'sent' });
+      $('edit-save').disabled = false;
+      Sound.tick();
+      return refreshCounts();
+    }).then(function () {
+      // the editor is only ever reached from the queue, so go back to it
+      return backToQueue();
+    }).then(function () {
+      if (item.state !== 'sent') { toast('Saved — it will go up with the photo', 'ok'); return null; }
+      if (!state.online) { toast('Saved — the layer will be updated when back online', 'warn', 4000); return null; }
+      return sync(true);
+    });
+  }
+
   /* ─────────────────── the session tag ─────────────────────────────
      A feature name and/or note that rides along with every photo until it is
      changed or cleared. Which inputs appear, and how long they may be, come
@@ -761,15 +855,22 @@
     }).then(applyTagFields);
   }
 
+  /** What of the current tag this layer can actually store, and what it cannot. */
+  function tagStatus() {
+    var kept = [], dropped = [];
+    if (tag.feature) (tagFields.feature ? kept : dropped).push({ label: 'Feature', value: tag.feature });
+    if (tag.note) (tagFields.notes ? kept : dropped).push({ label: 'Note', value: tag.note });
+    return { kept: kept, dropped: dropped };
+  }
+
   function applyTagFields() {
     var f = tagFields.feature, n = tagFields.notes;
-    var stranded = !f && !n && !!(tag.feature || tag.note);
+    var st = tagStatus();
     $('tag-feature-wrap').classList.toggle('hidden', !f);
     $('tag-note-wrap').classList.toggle('hidden', !n);
-    // hide the button on a layer with nowhere to put a tag — unless one is
+    // hide the button on a layer with nowhere to put a tag — unless something is
     // already set, in which case say so rather than drop it silently
-    $('tagger').classList.toggle('hidden', !f && !n && !stranded);
-    $('tagger').classList.toggle('stranded', stranded);
+    $('tagger').classList.toggle('hidden', !f && !n && !st.dropped.length);
 
     if (f) {
       $('tag-feature-name').textContent = f.alias;
@@ -783,8 +884,9 @@
       if (tag.note.length > n.length) tag.note = tag.note.slice(0, n.length);
       $('tag-note').value = tag.note;
     }
-    $('tag-hint').textContent = (!f && !n)
-      ? Config.layerName() + ' has no Feature or Note field, so this tag will not be written there.'
+    $('tag-hint').textContent = st.dropped.length
+      ? Config.layerName() + ' has no ' + st.dropped.map(function (d) { return d.label; }).join(' or ') +
+        ' field, so ' + (st.kept.length ? 'that part' : 'this tag') + ' will not be written there.'
       : 'Goes on every photo sent to ' + Config.layerName() + ' until cleared.';
     countTag();
     renderTag();
@@ -800,11 +902,20 @@
     });
   }
 
+  /**
+   * The button must show what this layer will actually record. Showing a
+   * feature name on a layer with no Feature field reads as "every photo is
+   * being tagged", when in truth none of them are.
+   */
   function renderTag() {
-    var text = tag.feature || tag.note;
-    $('tagger').classList.toggle('set', !!text);
-    $('tag-label').textContent = text || 'Tag';
-    $('tag-toggle').setAttribute('title', text ? 'Tagging every photo: ' + text : 'Tag these photos');
+    var st = tagStatus();
+    var shown = st.kept.length ? st.kept[0].value : (st.dropped.length ? st.dropped[0].value : '');
+    $('tagger').classList.toggle('set', !!st.kept.length);
+    $('tagger').classList.toggle('stranded', !!st.dropped.length && !st.kept.length);
+    $('tag-label').textContent = shown || 'Tag';
+    $('tag-toggle').setAttribute('title', !shown ? 'Tag these photos'
+      : st.kept.length ? 'Tagging every photo: ' + st.kept.map(function (k) { return k.value; }).join(' · ')
+      : 'Not written to ' + Config.layerName() + ': ' + shown);
   }
 
   function saveTag() {
@@ -972,7 +1083,8 @@
       chip.querySelector('.label').textContent = String(c.outstanding);
       chip.className = 'chip' + (c.error ? ' bad' : c.outstanding ? ' warn' : ' ok');
       $('mi-queue-sub').textContent = c.outstanding
-        ? c.outstanding + ' waiting' + (c.error ? ', ' + c.error + ' failed' : '')
+        ? c.outstanding + ' waiting' + (c.error ? ', ' + c.error + ' failed' : '') +
+          (c.edits ? ', ' + c.edits + ' edited' : '')
         : 'nothing pending';
       // watching the queue should mean watching it change, not tapping away and back
       if (sheetOpen('queue-panel')) renderQueue();
@@ -1085,10 +1197,10 @@
 
   function closeSheets() {
     if (self.Snake) Snake.close();          // never leave the game ticking behind a sheet
-    ['menu', 'queue-panel', 'settings-panel', 'about-panel', 'signin-panel', 'install-panel',
-     'layer-panel', 'bug-panel', 'import-panel', 'snake-panel'].forEach(function (id) {
-      var el = $(id);
-      if (!el || el.classList.contains('hidden')) return;
+    // every .sheet, not a hand-kept list — a new panel missing from that list
+    // stays stuck open over the viewfinder, which has happened twice
+    Array.prototype.forEach.call(document.querySelectorAll('.sheet'), function (el) {
+      if (el.classList.contains('hidden')) return;
       el.classList.remove('open');
       setTimeout(function () { el.classList.add('hidden'); }, 220);
     });
@@ -1104,19 +1216,21 @@
       }
       list.innerHTML = rows.map(function (r) {
         var when = new Date(r.createdAt).toLocaleString();
-        var sub = r.state === 'sent' ? 'uploaded · OBJECTID ' + (r.objectId || '?')
+        var sub = r.pendingEdit ? 'edit waiting to go up'
+          : r.state === 'sent' ? 'uploaded · OBJECTID ' + (r.objectId || '?')
           : r.state === 'error' ? esc(r.lastError || 'failed')
           : r.state === 'uploading' ? 'uploading…'
           : r.attempts ? 'retry ' + r.attempts + (r.lastError ? ' · ' + esc(r.lastError) : '') : 'waiting';
         var where = r.layerName && r.layerName !== Config.layerName() ? ' → ' + esc(r.layerName) : '';
         if (r.source === 'import') where = ' · imported' + where;
         if (r.feature) where = ' · ' + esc(r.feature) + where;
-        return '<div class="qrow ' + r.state + '">' +
+        return '<div class="qrow ' + r.state + (r.pendingEdit ? ' edited' : '') + '">' +
           '<div class="qthumb" style="background-image:url(' + (r.thumb || '') + ')"></div>' +
           '<div class="qmeta"><b>' + esc(when) + '</b>' +
           '<span>' + (r.heading === null || r.heading === undefined ? 'no heading' : Math.round(r.heading) + '°') +
           ' · ' + (r.hAcc ? '±' + Math.round(r.hAcc) + 'm' : 'no acc') + where + '</span>' +
           '<span class="qsub">' + sub + '</span></div>' +
+          '<button class="qedit" data-id="' + r.id + '" aria-label="Edit note">✎</button>' +
           (r.hasPhoto ? '<button class="qsave" data-id="' + r.id + '" aria-label="Save to device">⤓</button>' : '') +
           (r.state === 'sent' && r.objectId
             ? '<button class="qunsend" data-id="' + r.id + '" aria-label="Remove from the layer">⌫</button>'
@@ -1127,6 +1241,9 @@
       $('q-save-hint').textContent = held
         ? held + ' photo(s) still held on this device (' + (Config.get().keepHours || 48) + 'h after upload).'
         : 'No local copies left — they are cleared after upload.';
+      Array.prototype.forEach.call(list.querySelectorAll('.qedit'), function (b) {
+        b.addEventListener('click', function () { openEditor(b.dataset.id); });
+      });
       Array.prototype.forEach.call(list.querySelectorAll('.qsave'), function (b) {
         b.addEventListener('click', function () {
           Promise.all([Store.item(b.dataset.id), Store.photo(b.dataset.id)]).then(function (r) {
@@ -1544,6 +1661,10 @@
       closeSheets();
       renderQueue();
     });
+    $('edit-save').addEventListener('click', saveEdit);
+    $('edit-cancel').addEventListener('click', function () { editing = null; backToQueue(); });
+    $('edit-feature').addEventListener('input', countEdit);
+    $('edit-note').addEventListener('input', countEdit);
     $('q-save-all').addEventListener('click', function () {
       saveAllToDevice().then(renderQueue);
     });

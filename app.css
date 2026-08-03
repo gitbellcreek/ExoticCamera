@@ -307,7 +307,11 @@ body.syncing #topbar::after {
 .qmeta b { display: block; color: var(--txt); font-size: 13px; }
 .qmeta span { display: block; }
 .qsub { margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qdel, .qsave, .qunsend { border: 0; background: none; color: var(--dim); font-size: 16px; padding: 8px; }
+.qdel, .qsave, .qunsend, .qedit { border: 0; background: none; color: var(--dim); font-size: 16px; padding: 8px; }
+.qedit { color: var(--txt); }
+.qrow.edited { border-color: #7a6524; }
+.edit-head { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+#edit-panel .qthumb { width: 64px; height: 64px; }
 .qsave { color: var(--txt); }
 .qunsend { color: var(--warn); }
 .qdel[disabled], .qunsend[disabled] { opacity: .4; }
