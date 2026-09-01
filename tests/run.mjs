@@ -5,7 +5,7 @@ import path from 'node:path';
 import { HERE } from './env-lite.mjs';
 
 const ORDER = [
-  'layers', 'e2e', 'resilience', 'edit-server',            // node, no browser
+  'heading', 'layers', 'e2e', 'resilience', 'edit-server', // node, no browser
   'ui', 'ios', 'land', 'camera', 'import', 'roundtrip',    // browser
   'migrate', 'coldoffline', 'tag', 'edit-ui', 'snake',
 ];

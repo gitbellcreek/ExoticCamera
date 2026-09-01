@@ -205,10 +205,11 @@ js/config.js    defaults, field mapping, settings persistence
 js/store.js     IndexedDB — the photo queue and key/value store
 js/arcgis.js    auth, layer metadata, addFeatures + addAttachment, retry/backoff
 js/exif.js      reads and writes the EXIF block carrying position and heading
+js/heading.js   compass maths: where the lens points, in any pose, on either platform
 js/report.js    problem reports → the ExoticCameraBugs table
 js/snake.js     the Snake behind About
 js/sound.js     synthesised UI sounds
-js/app.js       camera, compass maths, sync loop, UI wiring
+js/app.js       camera, compass, sync loop, UI wiring
 sw.js           app-shell cache + background sync
 ```
 
