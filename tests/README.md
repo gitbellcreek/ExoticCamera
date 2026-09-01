@@ -1,6 +1,6 @@
 # Tests
 
-Fifteen suites, plain Node scripts — no framework. Each prints `ok`/`FAIL` lines
+Sixteen suites, plain Node scripts — no framework. Each prints `ok`/`FAIL` lines
 and exits non-zero on failure. They are the record of every bug found in the
 field, so a failure here almost always means a real regression rather than a
 flaky check.
@@ -43,6 +43,7 @@ writes to neither.
 
 | Suite | Browser | What it protects |
 | --- | :-: | --- |
+| `heading` | | The lens bearing is right in every pose on both platforms, in particular with an iPhone on its side, whatever Core Location takes its compass heading from |
 | `layers` | | Field mapping resolves correctly on both layers; Central stays the default; a queued photo keeps its own destination |
 | `e2e` | | Upload, attachment, resumable retry, invalid token, backoff curves, the airplane-mode photo that would not clear |
 | `resilience` | | A storage failure returning `null`/a string/a number must not become a second crash; problem reports round-trip; a refused report is held with its reason and goes up later; a photo whose bytes are gone is an error, not a silent success; a hung upload times out instead of blocking the queue; a row stranded mid-upload is reclaimed |

@@ -132,20 +132,14 @@
     $('compass').classList.toggle('unreliable', state.headingAccuracy !== null && state.headingAccuracy > 25);
   }
 
-  /** Azimuth of the rear camera axis, tilt compensated (device −Z into world). */
-  function cameraAzimuth(alpha, beta, gamma) {
-    var r = Math.PI / 180;
-    var a = alpha * r, b = beta * r, g = gamma * r;
-    var cA = Math.cos(a), sA = Math.sin(a);
-    var cB = Math.cos(b), sB = Math.sin(b);
-    var cG = Math.cos(g), sG = Math.sin(g);
-    // third column of the W3C rotation matrix, negated → world vector of device −Z
-    var vx = -(cA * sG + cG * sA * sB);
-    var vy = -(sA * sG - cA * cG * sB);
-    if (Math.abs(vx) < 1e-7 && Math.abs(vy) < 1e-7) return null;   // camera pointing at the sky/ground
-    var deg = Math.atan2(vx, vy) / r;
-    return (deg + 360) % 360;
-  }
+  /**
+   * iOS gives the compass as a heading of the phone's top edge and the tilt
+   * angles against an arbitrary yaw. Heading.iosCamera learns the offset
+   * between the two in poses where the compass is unambiguous and applies it
+   * in every pose — on its side included. Reset when the page is hidden: the
+   * motion frame may not survive a suspend.
+   */
+  var iosOffset = null;
 
   var smooth = null;
   function pushHeading(h, source, acc) {
@@ -186,14 +180,21 @@
   }
 
   function onOrientation(e) {
-    var alpha = e.alpha;
+    if (typeof Heading === 'undefined') return;          // half a cache: no maths, no heading
+    var az;
     if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
-      alpha = 360 - e.webkitCompassHeading;           // iOS: derive absolute alpha
-    } else if (!e.absolute) {
+      if (e.alpha === null || e.alpha === undefined) {
+        az = e.webkitCompassHeading;                   // no attitude to tilt-compensate with
+      } else {
+        var r = Heading.iosCamera(e.webkitCompassHeading, e.alpha, e.beta || 0, e.gamma || 0, iosOffset);
+        iosOffset = r.offset;
+        az = r.heading;
+      }
+    } else if (!e.absolute || e.alpha === null || e.alpha === undefined) {
       return;                                          // relative-only data is useless as a compass
+    } else {
+      az = Heading.cameraAzimuth(e.alpha, e.beta || 0, e.gamma || 0);
     }
-    if (alpha === null) return;
-    var az = cameraAzimuth(alpha, e.beta || 0, e.gamma || 0);
     if (az === null) return;
     gotOrientation = true;
     compassDenied = headingHopeless = false;
@@ -1420,7 +1421,8 @@
   function sensorState() {
     return [
       'compass=' + (gotOrientation ? 'live' : listening ? 'listening' : 'off'),
-      'hdg=' + (state.heading === null ? 'none' : Math.round(state.heading)),
+      'hdg=' + (state.heading === null ? 'none' : Math.round(state.heading)) +
+        (iosOffset === null ? '' : ' cal' + Math.round(iosOffset)),
       'gps=' + (state.pos ? '±' + Math.round(state.pos.coords.accuracy) + 'm/' + ago(fixAge()) : 'none') +
         (state.gpsDenied ? ' denied' : state.gpsError ? ' err' + state.gpsError : ''),
       'cam=' + (state.stream ? (cameraHealthy() ? 'live' : 'stalled') : 'off'),
@@ -1782,7 +1784,7 @@
     window.addEventListener('online', function () { setNet(true); });
     window.addEventListener('offline', function () { setNet(false); });
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState !== 'visible') return;
+      if (document.visibilityState !== 'visible') { iosOffset = null; return; }
       setNet(navigator.onLine);
       refreshCounts().then(function () {
         if (state.online && Config.get().autoSync) sync();

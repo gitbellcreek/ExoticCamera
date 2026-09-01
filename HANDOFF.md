@@ -59,6 +59,19 @@ refused call is retried on the next tap, and the app listens passively from boot
 so an already-granted origin needs no prompt at all. The first shutter press waits
 for the answer and the first sample rather than recording a null heading.
 
+**The iOS compass names the top edge of the phone, not alpha.** `webkitCompassHeading`
+is Core Location's heading with its portrait default, so it points along the top
+edge — and the W3C angles iOS supplies are against an arbitrary yaw. Reading the
+compass as alpha worked in portrait and broke with the phone on its side: the top
+edge points sideways there, and beta/gamma also flip through 180° as the lens
+crosses level, so a landscape bearing came out 90° or 180° off at random.
+`js/heading.js` learns the yaw offset between the arbitrary frame and the compass
+in poses where the compass is unambiguous (flat through upright, lens level or
+down) and applies it in every pose. Core Location's exact policy near vertical
+is undocumented; `tests/heading.mjs` simulates three plausible ones and the
+bearing holds under all of them. The offset resets when the page is hidden.
+`sensors` in a problem report shows it as `cal<n>` after `hdg=`.
+
 **The camera watchdog only trusts an ended track or a stopped frame clock.**
 `track.muted` fires constantly on iOS and means very little; treating it as failure
 restarted a perfectly good camera and caused a restart loop. A fresh stream also
@@ -158,6 +171,7 @@ js/config.js    layer presets, field mapping, settings
 js/store.js     IndexedDB: queue metadata, photo bytes, key/value, locks
 js/arcgis.js    auth, layer schema, add/update/delete, retry and backoff
 js/exif.js      reads and writes the EXIF block
+js/heading.js   compass maths, pure functions, covered by tests/heading.mjs
 js/report.js    problem reports → the ExoticCameraBugs table
 js/app.js       camera, compass, sync loop, tag, editor, all UI wiring
 js/snake.js     the Snake behind About
