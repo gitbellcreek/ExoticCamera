@@ -4,6 +4,7 @@ node_modules/
 # never commit credentials or tokens
 *.arcgis_pw
 *token*.txt
+tok*.txt
 .env
 tests/.token
 tests/.out/
