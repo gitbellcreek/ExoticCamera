@@ -30,7 +30,7 @@ jobs:
       - name: Stamp build id
         run: |
           BUILD="${GITHUB_SHA::7}"
-          sed -i "s/__BUILD__/$BUILD/g" sw.js js/config.js
+          sed -i "s/__BUILD__/$BUILD/g" sw.js js/config.js photopoints/sw.js photopoints/js/config.js
           echo "Built $BUILD"
 
       # enablement turns Pages on for the repo on the first run, so no manual

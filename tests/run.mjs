@@ -9,6 +9,9 @@ const ORDER = [
   'layers', 'e2e', 'resilience', 'edit-server',            // node, no browser
   'ui', 'ios', 'land', 'camera', 'import', 'roundtrip',    // browser
   'migrate', 'coldoffline', 'tag', 'edit-ui', 'snake',
+  'pp-upload',                                             // Photo Points: node, no network
+  'pp-land', 'pp-coexist',                                 // browser, no service
+  'pp-flow',                                               // browser, live service, Test station only
 ];
 const only = process.argv.slice(2);
 const suites = only.length ? only : ORDER;
