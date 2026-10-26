@@ -39,6 +39,16 @@ add a suite, copy the guard from `ui.mjs`, and never write a bare `deleteFeature
 Write tests point at a scratch layer; `layers.mjs` reads both shipped layers and
 writes to neither.
 
+`pp-flow` writes to the live `Photo_Monitoring` service: only under the
+station called **Test** (kept for this) or a station the run adds itself. It
+snapshots both layers first, deletes only rows that carry this run's own
+GlobalIDs and did not exist before, refuses to delete more than a run could
+have made, and puts the Test station's fields back as it found them. Do not
+delete the Test station; the suite refuses to run without it.
+
+`pp-land` and `pp-coexist` serve the app from `APP_URL` and need nothing else;
+`pp-flow` needs the token like the others.
+
 ## What each covers
 
 | Suite | Browser | What it protects |
@@ -58,15 +68,23 @@ writes to neither.
 | `tag` | ✓ | The session tag follows the layer's schema and never claims to apply where it cannot |
 | `edit-ui` | ✓ | The per-row editor, including the offline "edit waiting to go up" state |
 | `snake` | ✓ | Mostly that it stays in its lane: camera still live, shutter still works, keys stop reaching it |
+| `compass` | | The bearing on a simulated iPhone (WebKit's own angle decomposition, a noisy lagging compass): steady upright, in landscape, aimed at the ground, through turns and gyro-frame resets — with the old maths alongside for comparison |
+| `dedupe` | | A lost answer never files a point or a photo twice: the real upload path against a simulated service that drops replies |
+| `pp-upload` | | Photo Points' upload engine against a simulated service: chunk resume after a dropped connection, lost replies, an upload the service forgot, a station that must go up before its visit |
+| `pp-land` | ✓ | Photo Points on the smallest and largest iPhones, both ways up: all ten slots in view, nothing overlapping |
+| `pp-coexist` | ✓ | Exotic Camera and Photo Points on one origin: neither deletes the other's caches or worker; Photo Points opens offline from its own cache |
+| `pp-flow` | ✓ | Photo Points end to end against the live `Photo_Monitoring` service — see below |
 
 `fixtures/` holds six small JPEGs built with `piexif` — synthetic, no real data.
 `mkicons.py` regenerates the app icons from `icons/icon.svg`.
 
 ## Things that will waste your time
 
-- **rAF-rate polling starves IndexedDB writes.** `waitForFunction` polls on every
-  animation frame by default; if the callback reads the queue, an in-flight write
-  can be starved until the test times out. Pass `{ polling: 500 }`.
+- **`waitForFunction` does not await a Promise.** It takes the Promise itself as
+  truthy and returns at once, so `waitForFunction(() => Store.all().then(…))`
+  waits for nothing. Use `waitForAsync(page, fn)` from `browser.mjs`, which
+  polls `page.evaluate` (every 400 ms — rAF-rate polling of the queue can also
+  starve the IndexedDB write you are waiting for).
 - **The browser may have no route to the internet while node does.** That is what
   `relayArcGIS` in `browser.mjs` is for. It also gives you `setOffline(true)` for
   simulating a lost connection, which is more precise than `context.setOffline`.

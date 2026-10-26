@@ -1,7 +1,7 @@
 /* The easter egg still has to behave: reachable from About, stops when closed,
    and never interferes with the camera or the queue. */
 import { ROOT, OUT, FIXTURES, URLBASE, TOK, REFERER, arcFetch } from './env.mjs';
-import { chromium, CHROME, relayArcGIS } from './browser.mjs';
+import { chromium, CHROME, relayArcGIS, waitForAsync } from './browser.mjs';
 
 const browser = await chromium.launch({
   executablePath: CHROME,
@@ -103,7 +103,7 @@ if (!(await page.evaluate(() => document.getElementById('preview').videoWidth > 
 else ok('camera still live afterwards');
 await page.click('#shutter');
 // capture waits briefly on a first compass sample before it fires
-await page.waitForFunction(() => self.Store.all().then(r => r.length === 1), null, { timeout: 10000 })
+await waitForAsync(page, () => self.Store.all().then(r => r.length === 1), null, { timeout: 10000 })
   .then(() => ok('the shutter still works afterwards'))
   .catch(async () => {
     const why = await page.evaluate(() => [...document.querySelectorAll('.toast')].map(t => t.textContent));

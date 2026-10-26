@@ -1,7 +1,7 @@
 /* The editor itself. No ArcGIS traffic: the layer schema is seeded into the
    metadata cache and the update call is stubbed, so this stays about the UI. */
 import { ROOT, OUT, FIXTURES, URLBASE, TOK, REFERER, arcFetch } from './env.mjs';
-import { chromium, CHROME, relayArcGIS } from './browser.mjs';
+import { chromium, CHROME, relayArcGIS, waitForAsync } from './browser.mjs';
 const SERVICE = 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/El_Rat_Generic/FeatureServer';
 
 const browser = await chromium.launch({
@@ -142,7 +142,7 @@ await page.evaluate(async () => {
   window.__offline = false;
   window.dispatchEvent(new Event('online'));
 });
-await page.waitForFunction(() => self.Store.item('sent-row').then(r => !r.pendingEdit),
+await waitForAsync(page, () => self.Store.item('sent-row').then(r => !r.pendingEdit),
   null, { timeout: 15000, polling: 400 }).catch(() => {});
 const pushed = await page.evaluate(async () => ({
   seen: window.__updates, row: await self.Store.item('sent-row'),

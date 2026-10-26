@@ -8,7 +8,7 @@ var BUILD = '__BUILD__';
 // directly, in which case BUILD is never stamped and this is the only thing that
 // forces a fresh, complete precache — a half-populated cache is what turns an
 // offline launch into a blank screen.
-var REV = 'r11';
+var REV = 'r12';
 var CACHE = 'exoticcam-' + BUILD + '-' + REV;
 
 var SHELL = [
@@ -22,6 +22,7 @@ var SHELL = [
   'js/exif.js',
   'js/sound.js',
   'js/snake.js',
+  'js/compass.js',
   'js/app.js',
   'manifest.webmanifest',
   'icons/icon.svg',
@@ -41,11 +42,15 @@ self.addEventListener('install', function (e) {
   );
 });
 
+/* Only this app's old caches. Every GitHub Pages site of the account shares
+   one origin, and so one CacheStorage — deleting "everything that is not
+   mine" used to take Photo Points' offline copy (and any other Pages app's)
+   with it on every deploy. */
 self.addEventListener('activate', function (e) {
   e.waitUntil(
     caches.keys().then(function (keys) {
       return Promise.all(keys.map(function (k) {
-        if (k !== CACHE) return caches.delete(k);
+        if (k !== CACHE && k.indexOf('exoticcam-') === 0) return caches.delete(k);
       }));
     }).then(function () { return self.clients.claim(); })
   );
@@ -59,11 +64,18 @@ self.addEventListener('activate', function (e) {
    Everything cross-origin — every ArcGIS call — bypasses the worker entirely. */
 var NET_TIMEOUT = 2500;
 
+/* Apps that live in a folder below this one have their own worker. Until it
+   is installed this one is in charge of their first visit, and must not
+   answer for them — offline it would hand back Exotic Camera's page. */
+var SUBAPPS = ['photopoints/'];
+
 self.addEventListener('fetch', function (e) {
   var req = e.request;
   if (req.method !== 'GET') return;
   var url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  var base = new URL('./', self.location.href).pathname;
+  if (SUBAPPS.some(function (p) { return url.pathname.indexOf(base + p) === 0; })) return;
 
   e.respondWith(
     caches.match(req, { ignoreSearch: true }).then(function (hit) {
