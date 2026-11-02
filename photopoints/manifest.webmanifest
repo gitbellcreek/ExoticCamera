@@ -1,0 +1,17 @@
+{
+  "name": "Photo Points",
+  "short_name": "Photo Points",
+  "description": "Repeat photo monitoring: find the station, face the right way, and the visit and its full-size photos upload to ArcGIS.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b0f16",
+  "theme_color": "#0b0f16",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

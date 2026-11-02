@@ -132,19 +132,16 @@
     $('compass').classList.toggle('unreliable', state.headingAccuracy !== null && state.headingAccuracy > 25);
   }
 
-  /** Azimuth of the rear camera axis, tilt compensated (device −Z into world). */
-  function cameraAzimuth(alpha, beta, gamma) {
-    var r = Math.PI / 180;
-    var a = alpha * r, b = beta * r, g = gamma * r;
-    var cA = Math.cos(a), sA = Math.sin(a);
-    var cB = Math.cos(b), sB = Math.sin(b);
-    var cG = Math.cos(g), sG = Math.sin(g);
-    // third column of the W3C rotation matrix, negated → world vector of device −Z
-    var vx = -(cA * sG + cG * sA * sB);
-    var vy = -(sA * sG - cA * cG * sB);
-    if (Math.abs(vx) < 1e-7 && Math.abs(vy) < 1e-7) return null;   // camera pointing at the sky/ground
-    var deg = Math.atan2(vx, vy) / r;
-    return (deg + 360) % 360;
+  /* The bearing maths lives in js/compass.js, shared with Photo Points. It
+     used to be here, and it swapped iOS's compass reading into the Euler
+     angles — which jumped about whenever the phone was held upright, the very
+     pose photos are taken in. See the notes at the top of that file. */
+  // like report.js, a missing compass must not take the camera down with it
+  var tracker = self.Compass ? Compass.create() : null;
+
+  function screenAngle() {
+    var o = screen.orientation;
+    return o && typeof o.angle === 'number' ? o.angle : (window.orientation || 0);
   }
 
   var smooth = null;
@@ -186,18 +183,12 @@
   }
 
   function onOrientation(e) {
-    var alpha = e.alpha;
-    if (typeof e.webkitCompassHeading === 'number' && e.webkitCompassHeading >= 0) {
-      alpha = 360 - e.webkitCompassHeading;           // iOS: derive absolute alpha
-    } else if (!e.absolute) {
-      return;                                          // relative-only data is useless as a compass
-    }
-    if (alpha === null) return;
-    var az = cameraAzimuth(alpha, e.beta || 0, e.gamma || 0);
-    if (az === null) return;
+    if (!tracker) return;
+    var r = tracker.update(e, screenAngle(), e.timeStamp || performance.now());
+    if (!r || r.heading === null) return;              // relative-only, or no compass reading yet
     gotOrientation = true;
     compassDenied = headingHopeless = false;
-    pushHeading(az, 'sensor', e.webkitCompassAccuracy);
+    pushHeading(r.heading, 'sensor', r.accuracy === null ? undefined : r.accuracy);
     while (headingWaiters.length) headingWaiters.pop()(false);
   }
 
@@ -1419,7 +1410,7 @@
 
   function sensorState() {
     return [
-      'compass=' + (gotOrientation ? 'live' : listening ? 'listening' : 'off'),
+      'compass=' + (!tracker ? 'missing' : gotOrientation ? (tracker.settled ? 'live' : 'live-unchecked') : listening ? 'listening' : 'off'),
       'hdg=' + (state.heading === null ? 'none' : Math.round(state.heading)),
       'gps=' + (state.pos ? '±' + Math.round(state.pos.coords.accuracy) + 'm/' + ago(fixAge()) : 'none') +
         (state.gpsDenied ? ' denied' : state.gpsError ? ' err' + state.gpsError : ''),
@@ -1555,15 +1546,19 @@
       return;
     }
     toast('Reinstalling from GitHub Pages…', 'ok', 4000);
+    // Only this app's own worker and caches. Every GitHub Pages site of the
+    // account shares one origin — Photo Points lives right next door — and
+    // wiping all of them would take the other apps' offline copies with it.
     var jobs = [];
     if ('serviceWorker' in navigator) {
-      jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
-        return Promise.all(rs.map(function (r) { return r.unregister(); }));
+      jobs.push(navigator.serviceWorker.getRegistration().then(function (r) {
+        return r ? r.unregister() : null;
       }));
     }
     if (window.caches) {
       jobs.push(caches.keys().then(function (keys) {
-        return Promise.all(keys.map(function (k) { return caches.delete(k); }));
+        return Promise.all(keys.filter(function (k) { return k.indexOf('exoticcam-') === 0; })
+                               .map(function (k) { return caches.delete(k); }));
       }));
     }
     Promise.all(jobs).catch(function () { /* clear what we can, then reload regardless */ })

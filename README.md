@@ -11,12 +11,22 @@ Picking this up after a break? Start with **[HANDOFF.md](HANDOFF.md)**: how it
 deploys, why the awkward parts are the way they are, and what is still open.
 Tests are in **[tests/](tests/README.md)**.
 
+**[Photo Points](photopoints/README.md)** lives in `photopoints/` and is served
+next to this app at `…/ExoticCamera/photopoints/`: repeat photo monitoring for
+permanent photo stations — find the station, face the bearing it shows, shoot
+the set, and the visit and its full-size photos go up to the
+`Photo_Monitoring` service. It shares this app's compass, EXIF, sound and
+problem-report code.
+
 ## What it does
 
 - **Live viewfinder** with a surveyor-style compass card at the top. The heading is
-  tilt-compensated, so it reads the direction the *lens* points while you hold the
-  phone upright — not the direction the top of the phone points. Falls back to GPS
-  course over ground on devices with no magnetometer.
+  the direction the *lens* points, not the top of the phone, and it holds steady
+  with the phone upright: the gyro carries the bearing and iOS's compass reading
+  only keeps it on north (`js/compass.js`, shared with Photo Points — the old
+  maths jumped about near upright). Aimed at the ground it reads the direction
+  of the top of the photo. Falls back to GPS course over ground on devices with
+  no magnetometer.
 - **The compass starts itself.** iOS only hands out orientation data after a
   permission prompt raised from a user gesture, so the app asks on the *first touch
   anywhere* — no one has to know to tap the dial. If the first touch is the shutter,
@@ -67,9 +77,12 @@ Tests are in **[tests/](tests/README.md)**.
 - **Works offline.** Photos go into IndexedDB on the device and upload themselves
   when the connection comes back — including via Background Sync while the app is
   closed, on browsers that support it.
-- **Resumable uploads.** Each photo is a point (`addFeatures`) plus an attachment
-  (`addAttachment`). If the connection drops between the two, the retry picks up at
-  the attachment instead of creating a duplicate point. Every request has a
+- **Resumable uploads, never twice.** Each photo is a point plus an attachment. If
+  the connection drops between the two, the retry picks up at the attachment. The
+  point carries a GlobalID minted on the phone (sent through `applyEdits`, which
+  keeps it), so a retry after a lost answer finds the point instead of filing a
+  second one, and a photo whose answer was lost is looked for by name before it
+  is sent again. Every request has a
   deadline, so a connection that accepts an upload and then goes quiet fails
   visibly and lets the photos behind it through, rather than stalling the queue
   with nothing to show for it. A point that is on the layer without its photo
@@ -78,8 +91,10 @@ Tests are in **[tests/](tests/README.md)**.
   lift when a photo lands on the server, a gentle descending pair when the
   connection drops, and a three-note chime when the queue finally drains. All
   synthesised in about 4 KB of WebAudio — there are no sound files to download.
-- **Reinstall button** in the menu: unregisters the service worker, drops every
-  cache, and reloads from GitHub Pages. Queued photos and settings survive it.
+- **Reinstall button** in the menu: unregisters this app's service worker, drops
+  its caches, and reloads from GitHub Pages. Queued photos and settings survive
+  it. Other apps on the same origin (Photo Points, any other Pages site) are
+  left alone.
 - **Add to Home Screen** in the menu, with the steps for whichever browser is
   running. Installed, it loses the browser address bar — the only way to go truly
   full screen in Safari. Note that iOS gives the installed app its own storage, so
@@ -208,8 +223,10 @@ js/exif.js      reads and writes the EXIF block carrying position and heading
 js/report.js    problem reports → the ExoticCameraBugs table
 js/snake.js     the Snake behind About
 js/sound.js     synthesised UI sounds
-js/app.js       camera, compass maths, sync loop, UI wiring
+js/compass.js   lens bearing, pitch and roll from the motion sensors (shared with Photo Points)
+js/app.js       camera, compass wiring, sync loop, UI wiring
 sw.js           app-shell cache + background sync
+photopoints/    the Photo Points app — see its README
 ```
 
 `config.js`, `store.js`, `arcgis.js` and `report.js` are loaded by both the page

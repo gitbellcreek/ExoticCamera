@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- a photo post: a stake in the ground with four bearings around it -->
+  <rect width="512" height="512" rx="112" fill="#0b0f16"/>
+  <circle cx="256" cy="256" r="170" fill="none" stroke="#263349" stroke-width="16"/>
+  <path d="M256 70 l26 70 h-52 z" fill="#ff6b6b"/>
+  <path d="M442 256 l-70 26 v-52 z" fill="#8fa3c4"/>
+  <path d="M256 442 l-26 -70 h52 z" fill="#8fa3c4"/>
+  <path d="M70 256 l70 -26 v52 z" fill="#8fa3c4"/>
+  <rect x="226" y="176" width="60" height="150" rx="10" fill="#46d07f"/>
+  <rect x="226" y="176" width="60" height="30" rx="10" fill="#ffcf5c"/>
+  <ellipse cx="256" cy="334" rx="78" ry="16" fill="#1c2534"/>
+</svg>

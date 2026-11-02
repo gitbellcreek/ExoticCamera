@@ -49,3 +49,18 @@ export async function relayArcGIS(ctx, referer) {
     }
   };
 }
+
+/**
+ * Poll an async condition in the page until it holds. page.waitForFunction
+ * does not await a Promise: it takes the Promise itself as truthy and returns
+ * at once, so a wait on anything read from IndexedDB silently waits for
+ * nothing. Wait this way instead.
+ */
+export async function waitForAsync(page, fn, arg, { timeout = 15000, polling = 400 } = {}) {
+  const until = Date.now() + timeout;
+  for (;;) {
+    if (await page.evaluate(fn, arg)) return true;
+    if (Date.now() > until) throw new Error('timed out after ' + timeout + 'ms waiting for ' + String(fn).slice(0, 80));
+    await new Promise((r) => setTimeout(r, polling));
+  }
+}

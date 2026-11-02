@@ -342,22 +342,59 @@
         : g.Config.layerUrl();
     },
 
+    /**
+     * File the point. It carries a GlobalID minted on the phone, so a retry
+     * cannot file it twice: when the answer to an add is lost on a bad
+     * connection the point may well be on the layer already, and the layer
+     * then refuses that GlobalID as a duplicate — which is the cue to look up
+     * the point instead of adding a second one. (Only applyEdits honours a
+     * client GlobalID; addFeatures quietly replaces it with its own.)
+     */
     addFeature: function (item) {
       var url = Arc.targetUrl(item);
+      var t, gidField;
       return Promise.all([token(), Arc.layerMeta(false, url)]).then(function (r) {
-        var t = r[0], meta = r[1];
-        return postJson(url + '/addFeatures', {
+        t = r[0];
+        var meta = r[1];
+        var f = Arc.buildFeature(item, meta);
+        gidField = item.globalId && meta.globalIdField ? meta.globalIdField : null;
+        if (gidField) f.attributes[gidField] = item.globalId;
+        return postJson(url + '/applyEdits', {
           f: 'json',
           token: t,
           rollbackOnFailure: true,
-          features: JSON.stringify([Arc.buildFeature(item, meta)])
+          useGlobalIds: gidField ? true : undefined,
+          adds: JSON.stringify([f])
         });
       }).then(function (j) {
         var res = (j.addResults || [])[0];
-        if (!res || !res.success) {
-          throw new Error((res && res.error && res.error.description) || 'addFeatures rejected the point');
+        if (res && res.success) return res.objectId;
+        var why = (res && res.error && res.error.description) || 'the layer rejected the point';
+        if (gidField && /duplicate/i.test(why)) {
+          return Arc.findByGlobalId(url, gidField, item.globalId, t).then(function (oid) {
+            if (oid) return oid;
+            throw new Error(why);
+          });
         }
-        return res.objectId;
+        throw new Error(why);
+      });
+    },
+
+    findByGlobalId: function (url, field, gid, t) {
+      return postJson(url + '/query', {
+        f: 'json', token: t, where: field + " = '" + gid + "'", returnIdsOnly: true
+      }).then(function (j) {
+        return j.objectIds && j.objectIds.length ? j.objectIds[0] : null;
+      });
+    },
+
+    /** The id of an attachment of this name already on the point, if any. */
+    findAttachment: function (url, objectId, name) {
+      return token().then(function (t) {
+        return postJson(url + '/' + objectId + '/attachments', { f: 'json', token: t });
+      }).then(function (j) {
+        var hit = (j.attachmentInfos || []).filter(function (a) { return a.name === name; })[0];
+        return hit ? hit.id : null;
       });
     },
 
@@ -400,7 +437,14 @@
           });
         });
       }
-      var step = item.objectId ? Promise.resolve(item.objectId) : Arc.addFeature(item).then(function (oid) {
+      // the GlobalID is written down before the first attempt, so every retry sends the same one
+      var minted = item.objectId || item.globalId ? Promise.resolve() : (function () {
+        item.globalId = '{' + g.Store.uuid().toUpperCase() + '}';
+        return g.Store.patch(item.id, { globalId: item.globalId });
+      })();
+      var step = item.objectId ? Promise.resolve(item.objectId) : minted.then(function () {
+        return Arc.addFeature(item);
+      }).then(function (oid) {
         return g.Store.patch(item.id, { objectId: oid }).then(function () { return oid; });
       });
       return step.then(function (oid) {
@@ -416,8 +460,17 @@
             }
             return null;                                   // genuinely a point-only record
           }
-          return Arc.addAttachment(oid, blob,
-            item.filename || ('photo_' + item.id.slice(0, 8) + '.jpg'), Arc.targetUrl(item));
+          var name = item.filename || ('photo_' + item.id.slice(0, 8) + '.jpg');
+          var url = Arc.targetUrl(item);
+          // An upload whose answer never came back may have landed anyway. The
+          // name is unique to this photo, so look before sending it again.
+          var landed = item.attachTried ? Arc.findAttachment(url, oid, name) : Promise.resolve(null);
+          return landed.then(function (aid) {
+            if (aid) return aid;
+            return g.Store.patch(item.id, { attachTried: true }).then(function () {
+              return Arc.addAttachment(oid, blob, name, url);
+            });
+          });
         });
       }).then(function (aid) {
         // the photo is deliberately kept for a while after upload: it is the only

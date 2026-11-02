@@ -1,0 +1,407 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0d1117">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Photo Points">
+<title>Photo Points</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="app.css">
+
+<body class="view-home">
+
+<!-- ══════════════════════════ stations ══════════════════════════ -->
+<section id="home">
+  <header id="hbar">
+    <div class="brand"><img src="icons/icon.svg" alt=""><b>Photo Points</b></div>
+    <div class="chips">
+      <button class="chip" id="chip-net" title="Connection"><span class="dot"></span><span class="label">…</span></button>
+      <button class="chip" id="chip-queue" title="Waiting to upload"><span class="ico">⇪</span><span class="label">0</span></button>
+      <button class="chip" id="chip-gps" title="GPS accuracy"><span class="ico">◎</span><span class="label">--</span></button>
+    </div>
+    <button id="menu-btn" aria-label="Menu" aria-haspopup="dialog"><span></span><span></span><span></span></button>
+  </header>
+
+  <div id="home-tools">
+    <input type="search" id="search" placeholder="Search stations" autocomplete="off" spellcheck="false" enterkeyhint="search">
+    <button class="round small" id="refresh-btn" aria-label="Refresh stations" title="Refresh stations">↻</button>
+  </div>
+
+  <div id="drafts"></div>
+  <div id="signin-nudge" class="nudge hidden">
+    <span>Sign in to load the stations.</span>
+    <button class="btn small" id="nudge-signin">Sign in</button>
+  </div>
+  <p class="hint" id="list-status"></p>
+  <div id="station-list" role="list"></div>
+
+  <button class="btn fab" id="new-station-btn">+ New station here</button>
+</section>
+
+<!-- ══════════════════════════ camera ═══════════════════════════ -->
+<section id="cam" aria-label="Camera">
+  <div id="viewfinder">
+    <video id="preview" playsinline muted autoplay></video>
+    <img id="ghost" alt="" class="hidden">
+    <div id="novideo" class="novideo hidden">
+      <p id="novideo-msg">Camera not started</p>
+      <button class="btn" id="start-cam">Enable camera</button>
+    </div>
+  </div>
+  <div id="flash" aria-hidden="true"></div>
+  <div id="saving" class="hidden" aria-live="polite"><span class="spin"></span>Saving full-size photo…</div>
+
+  <header id="topbar">
+    <div id="compass" role="img" aria-label="Compass">
+      <svg viewBox="0 0 200 200" id="compass-svg">
+        <defs>
+          <radialGradient id="dialGrad" cx="50%" cy="42%" r="62%">
+            <stop offset="0%" stop-color="#20293a"/>
+            <stop offset="100%" stop-color="#0b0f16"/>
+          </radialGradient>
+        </defs>
+        <circle cx="100" cy="100" r="95" fill="url(#dialGrad)" stroke="#3d4a63" stroke-width="2"/>
+        <g id="dial"></g>
+        <g id="labels"></g>
+        <g id="target-mark" class="hidden"><path d="M100 4 l7 13 h-14 z"/><line x1="100" y1="17" x2="100" y2="40"/></g>
+        <path d="M100 6 l9 17 h-18 z" fill="#ffcf5c" id="lubber"/>
+      </svg>
+      <div id="heading-read"><span id="heading-deg">---</span><span class="unit">°</span><span id="heading-ref"></span><span id="heading-card">--</span></div>
+    </div>
+
+    <div id="cam-info">
+      <b id="cam-station">—</b>
+      <span id="cam-slot">—</span>
+      <span id="cam-target"></span>
+    </div>
+
+    <button id="cam-close" class="round small" aria-label="Back to stations">✕</button>
+  </header>
+
+  <div id="aim" aria-live="polite">
+    <div id="aim-text"></div>
+    <div id="level"><div id="horizon"></div><span id="pitch-read"></span></div>
+  </div>
+
+  <footer id="controls">
+    <div id="slots" role="tablist" aria-label="Photo slots"></div>
+    <div id="shutter-row">
+      <button id="review" class="thumb" aria-label="Photos in this visit"><span id="review-count"></span></button>
+      <button id="shutter" aria-label="Take picture"><span class="ring"></span><span class="core"></span></button>
+      <button id="finish" class="round done" aria-label="Finish visit">Done</button>
+    </div>
+    <div id="cam-tools">
+      <button class="chip" id="ghost-btn" aria-pressed="false">Last visit</button>
+      <button class="chip" id="details-btn">Visit details</button>
+      <button class="chip" id="chip-cal" title="Compass">compass</button>
+    </div>
+  </footer>
+</section>
+
+<div id="toasts" aria-live="polite"></div>
+
+<!-- ══════════════════════════ sheets ═══════════════════════════ -->
+
+<div id="station-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Station">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2 id="sp-title">Station</h2>
+    <div class="guide">
+      <svg viewBox="0 0 100 100" class="guide-arrow" id="sp-arrow" aria-hidden="true">
+        <circle cx="50" cy="50" r="46" fill="none" stroke="#263349" stroke-width="3"/>
+        <path d="M50 10 L68 62 L50 52 L32 62 Z" fill="#2a6df0"/>
+      </svg>
+      <div><b id="sp-dist">—</b><span id="sp-dir"></span></div>
+    </div>
+    <dl class="facts" id="sp-facts"></dl>
+    <p class="hint" id="sp-ghost"></p>
+    <div class="row">
+      <button class="btn" id="sp-start">Start visit</button>
+      <button class="btn ghost" id="sp-edit">Edit station</button>
+    </div>
+    <div class="row">
+      <a class="btn ghost" id="sp-maps" target="_blank" rel="noopener">Directions</a>
+      <button class="btn ghost" id="sp-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="details-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Visit details">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2 id="dp-title">Visit details</h2>
+    <p class="hint" id="dp-when"></p>
+    <label class="fld"><span>Observer(s)</span>
+      <input type="text" id="dp-observer" autocomplete="name" placeholder="who took the photos"></label>
+    <label class="fld"><span>Monitoring event</span>
+      <input type="text" id="dp-event" placeholder="e.g. 2026 Fall, Post-burn" list="dp-event-list">
+      <datalist id="dp-event-list"></datalist></label>
+    <label class="fld"><span>Post condition</span>
+      <select id="dp-condition"></select></label>
+    <label class="fld"><span>Visit notes</span>
+      <textarea id="dp-notes" rows="3"></textarea></label>
+
+    <div class="fld-details" id="dp-post">
+      <div class="post-q"><b>Post at this station</b>
+        <div class="seg" id="dp-post-seg">
+          <button data-v="Yes">Installed</button>
+          <button data-v="No">No post</button>
+        </div>
+      </div>
+      <div id="dp-post-new" class="hidden">
+        <p class="hint">Installed on this visit — the station will be updated.</p>
+        <label class="fld"><span>Post type</span><select id="dp-post-type"></select></label>
+        <label class="fld"><span>Tag / marking</span><input type="text" id="dp-post-tag"></label>
+      </div>
+    </div>
+
+    <p class="hint" id="dp-summary"></p>
+    <div class="row">
+      <button class="btn" id="dp-finish">Save &amp; upload</button>
+      <button class="btn ghost" id="dp-keep">Keep shooting</button>
+    </div>
+    <div class="row"><button class="btn ghost danger" id="dp-discard">Discard this visit</button></div>
+  </div>
+</div>
+
+<div id="review-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Photos in this visit">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2 id="rv-title">Photos</h2>
+    <div id="rv-list"></div>
+    <div class="row"><button class="btn ghost" id="rv-close">Close</button></div>
+  </div>
+</div>
+
+<div id="photo-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Photo">
+  <div class="sheet-inner wide">
+    <img id="pv-img" alt="">
+    <p class="hint" id="pv-meta"></p>
+    <div class="row">
+      <button class="btn ghost danger" id="pv-delete">Delete photo</button>
+      <button class="btn ghost" id="pv-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="queue-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Upload queue">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Upload queue</h2>
+    <div id="queue-list" class="queue-list"></div>
+    <div class="row">
+      <button class="btn" id="q-sync">Upload now</button>
+      <button class="btn ghost" id="q-clear-done">Clear uploaded</button>
+    </div>
+    <p class="hint" id="q-hint"></p>
+  </div>
+</div>
+
+<div id="edit-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Edit station">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2 id="ep-title">Edit station</h2>
+    <div class="fld"><span>Post installed</span>
+      <div class="seg" id="ep-post-seg"><button data-v="Yes">Yes</button><button data-v="No">No</button></div></div>
+    <label class="fld"><span>Post type</span><select id="ep-post-type"></select></label>
+    <label class="fld"><span>Tag / marking</span><input type="text" id="ep-post-tag"></label>
+    <label class="fld"><span>Install date</span><input type="date" id="ep-install"></label>
+    <label class="fld"><span>Status</span><select id="ep-status"></select></label>
+    <label class="fld"><span>Notes</span><textarea id="ep-notes" rows="3"></textarea></label>
+    <p class="hint">Saved on the phone and sent to the layer with the next upload.</p>
+    <div class="row">
+      <button class="btn" id="ep-save">Save</button>
+      <button class="btn ghost" id="ep-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="new-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="New station">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>New station here</h2>
+    <p class="hint" id="np-where"></p>
+    <label class="fld"><span>Station ID</span><input type="text" id="np-id" autocapitalize="characters" spellcheck="false"></label>
+    <label class="fld"><span>Site / preserve</span><input type="text" id="np-site"></label>
+    <label class="fld"><span>Management unit</span><input type="text" id="np-mu" spellcheck="false"></label>
+    <div class="fld"><span>Post installed</span>
+      <div class="seg" id="np-post-seg"><button data-v="Yes">Yes</button><button data-v="No" class="on">No</button></div></div>
+    <label class="fld"><span>Notes</span><textarea id="np-notes" rows="2"></textarea></label>
+    <div class="row">
+      <button class="btn" id="np-save">Add station</button>
+      <button class="btn ghost" id="np-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="menu" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Menu">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <section class="acct">
+      <div>
+        <div class="acct-name" id="acct-name">Not signed in</div>
+        <div class="acct-sub" id="acct-sub">ArcGIS Online</div>
+      </div>
+      <button class="btn small" id="auth-btn">Sign in</button>
+    </section>
+    <nav class="menu-list">
+      <button class="item" id="mi-queue"><span class="i">⇪</span><span>Upload queue<em id="mi-queue-sub">nothing waiting</em></span></button>
+      <button class="item" id="mi-sync"><span class="i">↻</span><span>Upload now<em>push everything waiting</em></span></button>
+      <button class="item" id="mi-offline"><span class="i">⤓</span><span>Get ready for offline<em id="mi-offline-sub">stations and last visits' photos</em></span></button>
+      <button class="item" id="mi-settings"><span class="i">⚙</span><span>Settings<em>bearings, photos, sounds</em></span></button>
+      <button class="item" id="mi-install"><span class="i">⤒</span><span>Add to Home Screen<em>full screen, and keeps photos safe</em></span></button>
+      <button class="item" id="mi-reinstall"><span class="i">⟲</span><span>Reinstall app<em>fetch the latest version</em></span></button>
+      <button class="item" id="mi-bug"><span class="i">☍</span><span>Report a problem<em>send a diagnostic to the team</em></span></button>
+      <button class="item" id="mi-about"><span class="i">ⓘ</span><span>About<em id="mi-about-sub">v0</em></span></button>
+    </nav>
+  </div>
+</div>
+
+<div id="settings-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Settings">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Settings</h2>
+
+    <div class="fld"><span>Bearings are measured from</span>
+      <div class="seg" id="s-north"><button data-v="true">True north</button><button data-v="magnetic">Magnetic north</button></div></div>
+    <label class="fld"><span>Magnetic declination (° east; west is negative)</span>
+      <input type="number" id="s-decl" step="0.1" min="-30" max="30"></label>
+    <p class="hint">−6.3° for Hillsborough County in 2026 (NOAA WMM-2025). The phone's compass is
+      magnetic; with true north selected every bearing — shown, recorded in the photo and in its
+      name — has this added.</p>
+    <label class="fld"><span>On target within ± degrees</span>
+      <input type="number" id="s-tol" min="1" max="30" step="1"></label>
+    <label class="fld chk"><input type="checkbox" id="s-advance"><span>After a shot, move to the next empty slot</span></label>
+    <label class="fld chk"><input type="checkbox" id="s-ghost"><span>Show the last visit's photo over the camera</span></label>
+
+    <label class="fld"><span>Photo size</span>
+      <select id="s-maxdim">
+        <option value="0">Full resolution (as the camera delivers it)</option>
+        <option value="3000">3000 px long edge</option>
+        <option value="2048">2048 px long edge</option>
+        <option value="1600">1600 px long edge</option>
+      </select></label>
+    <label class="fld"><span>JPEG quality</span>
+      <input type="range" id="s-quality" min="0.6" max="0.98" step="0.02">
+      <output id="s-quality-out"></output></label>
+    <label class="fld chk"><input type="checkbox" id="s-sound"><span>Sounds</span></label>
+    <label class="fld chk"><input type="checkbox" id="s-haptics"><span>Vibration</span></label>
+    <label class="fld chk"><input type="checkbox" id="s-autosync"><span>Upload automatically when online</span></label>
+    <label class="fld chk"><input type="checkbox" id="s-report"><span>Report problems automatically</span></label>
+
+    <details class="fld-details">
+      <summary>Service and sign-in</summary>
+      <label class="fld"><span>Feature service URL</span>
+        <input type="url" id="s-url" spellcheck="false" autocapitalize="off"></label>
+      <label class="fld"><span>OAuth app id (client id)</span>
+        <input type="text" id="s-appid" spellcheck="false" autocapitalize="off"></label>
+      <label class="fld"><span>Portal</span>
+        <input type="url" id="s-portal" spellcheck="false" autocapitalize="off"></label>
+      <p class="hint">Redirect URI to register on the ArcGIS app: <code id="s-redirect"></code></p>
+      <label class="fld"><span>Upload chunk size (KB)</span>
+        <input type="number" id="s-part" min="128" max="8192" step="128"></label>
+    </details>
+
+    <div class="row">
+      <button class="btn" id="s-save">Save</button>
+      <button class="btn ghost" id="s-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="signin-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Sign in">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Sign in to ArcGIS</h2>
+    <p class="hint">The stations and visits need an ArcGIS account. Only the resulting token is kept on the phone.</p>
+    <button class="btn" id="si-oauth">Sign in with ArcGIS (OAuth)</button>
+    <p class="hint">Needs an app id in Settings. Preferred — the app never sees your password.</p>
+    <details class="fld-details" open>
+      <summary>Sign in with username &amp; password</summary>
+      <label class="fld"><span>Username</span>
+        <input type="text" id="si-user" autocomplete="username" spellcheck="false" autocapitalize="off"></label>
+      <label class="fld"><span>Password</span>
+        <input type="password" id="si-pass" autocomplete="current-password"></label>
+      <button class="btn" id="si-go">Sign in</button>
+      <p class="hint">The password goes straight to ArcGIS for a token and is never stored.</p>
+    </details>
+    <details class="fld-details">
+      <summary>Paste a token</summary>
+      <label class="fld"><span>Token</span><input type="text" id="si-token" spellcheck="false"></label>
+      <button class="btn ghost" id="si-token-go">Use token</button>
+    </details>
+    <div class="row"><button class="btn ghost" id="si-close">Close</button></div>
+  </div>
+</div>
+
+<div id="bug-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Report a problem">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Report a problem</h2>
+    <p class="hint">Sends a row to the ExoticCameraBugs table: what went wrong, the build, the queue,
+      sensor state and the last few things the app did. No photos are sent.</p>
+    <label class="fld"><span>What happened?</span>
+      <input type="text" id="bug-note" placeholder="optional — e.g. the compass spun when I turned"></label>
+    <div id="bug-preview" class="hint"></div>
+    <div class="row">
+      <button class="btn" id="bug-send">Send report</button>
+      <button class="btn ghost" id="bug-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="install-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="Add to Home Screen">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Add to Home Screen</h2>
+    <p class="hint">Installed, the app runs full screen — and Safari keeps its photos safe.
+      A website's storage is cleared after a week without a visit; an installed app's is not.</p>
+    <ol class="steps" id="steps-ios">
+      <li>Tap the <b>Share</b> button in Safari — the square with an arrow coming out of it.</li>
+      <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+      <li>Tap <b>Add</b>, then open <b>Photo Points</b> from your Home Screen.</li>
+    </ol>
+    <ol class="steps hidden" id="steps-other">
+      <li>Open your browser's menu (⋮).</li>
+      <li>Choose <b>Install app</b> or <b>Add to Home screen</b>.</li>
+    </ol>
+    <p class="hint">The installed app has its own storage: it starts empty and asks you to sign in
+      once. Let anything waiting finish uploading here first.</p>
+    <p class="hint bad-text hidden" id="install-queue-warn"></p>
+    <div class="row"><button class="btn ghost" id="i-close">Close</button></div>
+  </div>
+</div>
+
+<div id="about-panel" class="sheet hidden" role="dialog" aria-modal="true" aria-label="About">
+  <div class="sheet-inner">
+    <div class="sheet-grab"></div>
+    <h2>Photo Points</h2>
+    <p class="hint" id="about-body"></p>
+    <div class="row"><button class="btn ghost" id="a-close">Close</button></div>
+  </div>
+</div>
+
+<script src="js/config.js"></script>
+<script src="js/store.js"></script>
+<script src="js/arc.js"></script>
+<script src="../js/report.js"></script>
+<script src="../js/exif.js"></script>
+<script src="../js/sound.js"></script>
+<script src="../js/compass.js"></script>
+<script src="js/app.js"></script>
+<script>
+// Watchdog: if app.js never ran — a missing file, a bad cache entry — say so
+// instead of leaving an empty screen.
+setTimeout(function () {
+  if (self.__ppBooted) return;
+  var s = document.getElementById('list-status');
+  if (!s) return;
+  s.textContent = 'The app did not start. Its files may be incomplete — reload to fetch them again.';
+  s.className = 'hint bad-text';
+}, 4000);
+</script>
+</body>

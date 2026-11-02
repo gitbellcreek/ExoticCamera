@@ -3,8 +3,9 @@
 Where the project stands, what is deliberate, and what is still open. `README.md`
 describes what the app *does*; this is the note for whoever picks it up next.
 
-Last worked on: 3 August 2026. Branch `claude/mobile-arcgis-photo-app-6sbfip`,
-which is also the repository's default branch.
+Last worked on: 26 October 2026 (Photo Points added in `photopoints/`; compass,
+duplicate-upload and service-worker fixes here). Default branch
+`claude/mobile-arcgis-photo-app-6sbfip`.
 
 ## State
 
@@ -38,6 +39,44 @@ settings survive that.
 ## Decisions you would otherwise have to rediscover
 
 Each of these came from something breaking in the field.
+
+**The compass never uses a lone Euler angle** (`js/compass.js`). The old code
+put iOS's compass reading in place of alpha and kept beta and gamma. Held
+upright — the photo pose — those angles are at gimbal lock: gamma swings
+through tens of degrees with a degree of tilt, and the bearing jumped with it
+(reported from the field). WebKit's source settles what the inputs are:
+alpha/beta/gamma are one exact decomposition of CoreMotion's attitude in an
+arbitrary-yaw frame (so alpha is relative on iOS), and `webkitCompassHeading`
+is Core Location's `magneticHeading`. So the attitude is only ever rebuilt as a
+whole rotation matrix, and the compass reading only learns the offset between
+the gyro frame and magnetic north — slowly, only while the phone is still, and
+only from poses where the top and the back of the phone agree, so Apple's
+undocumented meaning of "heading" for an upright phone never matters. A jump
+no hand could make (iOS restarting its gyro frame) starts it afresh. Pointing
+at the ground, the bearing blends to the top-of-photo direction from 50° down.
+`tests/compass.mjs` replays WebKit's angle decomposition against a simulated
+phone; the old maths is in there too, for comparison.
+
+**A point and a photo can never be filed twice.** When the answer to an upload
+is lost, the upload may well have landed. Points carry a GlobalID minted on the
+phone and go through `applyEdits` with `useGlobalIds` — `addFeatures` silently
+replaces a client GlobalID with its own, which was checked against the live
+service — so a retry is refused as a duplicate and the point is looked up
+instead. A photo whose answer was lost is looked for by its (unique) name
+before it is sent again. `tests/dedupe.mjs`.
+
+**The origin is shared.** Every GitHub Pages site of the account is
+`gitbellcreek.github.io`, so CacheStorage, worker registrations and IndexedDB
+are shared with Photo Points and anything else published. The worker's
+activate used to delete every cache that was not its own, and Reinstall
+unregistered every worker and emptied every cache. Both now touch only
+`exoticcam-…` and this app's own registration; the worker also leaves the
+`photopoints/` folder to its own worker. `tests/pp-coexist.mjs` fails on the
+old code.
+
+**`index.html` has a doctype.** It had none, so the app ran in quirks mode.
+Screenshots before and after are pixel-identical; it is there so a future CSS
+change does not meet quirks-mode surprises.
 
 **Photo bytes live in their own IndexedDB store (`photos`), never on the queue
 row.** They used to sit on the row, so every state change rewrote the whole JPEG —
@@ -182,6 +221,15 @@ stack. `sensors` records compass, GPS age, camera state and whether the app was
 installed. That breadcrumb trail is what identified the stuck-upload bug; ask for
 a report from **Menu → Report a problem** at the moment something looks wrong
 rather than afterwards.
+
+## Photo Points
+
+`photopoints/` is a second app on the same Pages site, for repeat photo
+monitoring against the `Photo_Monitoring` service (stations + a visits table,
+photos as keyworded attachments). Its README covers what it does and why its
+uploads are chunked and GlobalID-guarded; its four suites are in
+`tests/README.md`. It shares `js/compass.js`, `js/exif.js`, `js/sound.js` and
+`js/report.js` — a change to any of those is a change to both apps.
 
 ## If you pick this up
 
