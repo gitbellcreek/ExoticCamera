@@ -10,7 +10,7 @@
 var BUILD = '__BUILD__';
 // Bump REV whenever the file list changes — with Pages serving the branch
 // directly, BUILD is never stamped and this is the only cache key that moves.
-var REV = 'r4';
+var REV = 'r5';
 var CACHE = 'photopoints-' + BUILD + '-' + REV;
 
 var SHELL = [

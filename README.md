@@ -26,7 +26,9 @@ problem-report code.
   only keeps it on north (`js/compass.js`, shared with Photo Points — the old
   maths jumped about near upright). Aimed at the ground it reads the direction
   of the top of the photo. Falls back to GPS course over ground on devices with
-  no magnetometer.
+  no magnetometer. After the phone has been locked it learns north again —
+  iOS restarts its motion sensors from a new starting point — and shows no
+  heading for a moment rather than the one from before.
 - **The compass starts itself.** iOS only hands out orientation data after a
   permission prompt raised from a user gesture, so the app asks on the *first touch
   anywhere* — no one has to know to tap the dial. If the first touch is the shutter,

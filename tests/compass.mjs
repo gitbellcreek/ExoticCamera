@@ -117,6 +117,8 @@ function simulate(segments, opts = {}) {
   let prev = null;
   const BLEND = 24;
   for (const seg of segments) {
+    if (seg.pause) { t += seg.pause * 1000; prev = null; }   // no readings at all (phone locked), and the person moved on
+    if (seg.interrupt && tracker.interrupt) tracker.interrupt();   // the app saw the page hidden
     if (seg.frameJump) frameYaw += seg.frameJump;   // motion updates restarted
     const n = Math.round(seg.secs * 60);
     const twist = (seg.roll || 0) + (seg.quarter || 0);
@@ -161,6 +163,8 @@ function simulate(segments, opts = {}) {
     }
     prev = { yaw: seg.yaw + (seg.turn || 0) * (n / 60), pitch: seg.pitch, twist, quarter: seg.quarter || 0 };
   }
+  out.tracker = tracker;
+  out.end = t;
   return out;
 }
 
@@ -279,7 +283,7 @@ console.log('\n== turning on the spot, then stopping');
 }
 
 /* ── 6. iOS restarts its gyro frame ───────────────────────────────── */
-console.log('\n== the gyro frame jumps (app backgrounded and back)');
+console.log('\n== the gyro frame jumps while readings keep coming');
 {
   const rows = simulate([
     { name: 'read', yaw: 90, ...READ, secs: 3 },
@@ -291,6 +295,61 @@ console.log('\n== the gyro frame jumps (app backgrounded and back)');
   console.log(`   back on track ${(settle / 60).toFixed(2)}s after the jump · then ${fmt(after)}`);
   if (settle < 0 || settle > 90) fail('did not re-acquire within 1.5s'); else ok('re-acquires after a frame reset');
   if (after.p95 > 3) fail('wrong after the jump'); else ok('correct after the jump');
+}
+
+/* ── 6b. the phone locked between stations ───────────────────────── */
+// What happened on 3 Nov 2026: north checked, the phone locked on the walk to
+// the next post (no readings at all), iOS back with a new gyro frame, and the
+// whole visit shot in landscape — a pose that never cross-checks north. The
+// tracker kept the old north, about 180° out, and said it was settled.
+console.log('\n== locked, then unlocked at the next post: no readings in between, a new gyro frame');
+for (const jumpBy of [180, 75]) {
+  const rows = simulate([
+    { name: 'read', yaw: 90, ...READ, secs: 3 },                                           // north checked
+    { name: 'shoot', yaw: 90, ...UPRIGHT, quarter: 90, secs: 3 },                          // a visit, in landscape
+    { name: 'locked', yaw: 200, ...UPRIGHT, quarter: 90, secs: 4, pause: 60, frameJump: jumpBy },  // straight back to shooting
+    { name: 'check', yaw: 200, ...READ, secs: 3 },                                         // one look at the screen
+    { name: 'shoot2', yaw: 200, ...UPRIGHT, quarter: 90, secs: 4 },
+  ]);
+  const before = seg(rows, 'shoot', 30), locked = seg(rows, 'locked'), check = seg(rows, 'check');
+  const right = stats(seg(rows, 'locked', 90), 'got'), after = stats(seg(rows, 'shoot2', 30), 'got');
+  const claims = locked.filter((r) => r.settled).length;
+  const blank = locked.findIndex((r) => r.got !== null) / 60;                     // seconds with no heading
+  const worst = Math.max(...locked.filter((r) => r.got !== null).map((r) => Math.abs(diff(r.got, r.want))));
+  const d = rows.tracker.diag ? rows.tracker.diag(rows.end) : { resets: 0, why: null };
+  console.log(`   frame moved ${jumpBy}°: no heading for ${blank.toFixed(2)}s, then never more than ${worst.toFixed(1)}° out; from 1.5s ${fmt(right)} · ` +
+              `claims checked on ${claims} of ${locked.length} readings · after one look ${fmt(after)} · resets ${d.resets} (${d.why})`);
+  if (!before.every((r) => r.settled)) fail('was not settled before the lock — the scenario is wrong');
+  if (claims) fail(`frame moved ${jumpBy}°: still says north is checked after the phone was locked`);
+  else ok(`frame moved ${jumpBy}°: after unlocking it says north is not checked`);
+  if (worst > 15 || blank > 1.3) fail(`frame moved ${jumpBy}°: showed a wrong heading after unlocking (worst ${worst.toFixed(1)}°, blank ${blank.toFixed(2)}s)`);
+  else ok(`frame moved ${jumpBy}°: no wrong heading after unlocking — a moment with none, then within ${worst.toFixed(1)}°`);
+  if (right.p95 > 3) fail(`frame moved ${jumpBy}°: heading wrong after unlocking (${fmt(right)})`);
+  else ok(`frame moved ${jumpBy}°: heading right again within 1.5 s of unlocking`);
+  if (!check[check.length - 1].settled || after.p95 > 3 || !seg(rows, 'shoot2').every((r) => r.settled)) fail(`frame moved ${jumpBy}°: one look at the screen did not check north`);
+  else ok(`frame moved ${jumpBy}°: one look at the screen checks north again`);
+  if (d.resets !== 1 || d.why !== 'pause') fail('the reset is not reported: ' + JSON.stringify(d)); else ok('the reset is reported (for problem reports)');
+}
+{
+  // a photo being saved holds the readings up for a moment: that must not cost the check
+  const rows = simulate([
+    { name: 'read', yaw: 30, ...READ, secs: 3 },
+    { name: 'shoot', yaw: 30, ...UPRIGHT, quarter: 90, secs: 2 },
+    { name: 'stall', yaw: 30, ...UPRIGHT, quarter: 90, secs: 2, pause: 0.8 },
+  ]);
+  const st = seg(rows, 'stall'), s = stats(st, 'got');
+  if (!st.every((r) => r.settled) || s.p95 > 3) fail('a 0.8 s stall cost the check: ' + fmt(s));
+  else ok('a 0.8 s stall (a photo being saved) keeps north, still checked: ' + fmt(s));
+}
+{
+  // the app says the page was hidden: even a short absence means north is learned again
+  const rows = simulate([
+    { name: 'read', yaw: 300, ...READ, secs: 3 },
+    { name: 'hidden', yaw: 300, ...UPRIGHT, quarter: 270, secs: 3, pause: 0.5, interrupt: true, frameJump: 120 },
+  ]);
+  const h = seg(rows, 'hidden'), s = stats(seg(rows, 'hidden', 90), 'got');
+  if (h.some((r) => r.settled)) fail('still says north is checked after the page was hidden'); else ok('page hidden (the app says so): north is not checked any more');
+  if (s.p95 > 3) fail('wrong after the page came back: ' + fmt(s)); else ok('heading right a moment after the page came back: ' + fmt(s));
 }
 
 /* ── 7. a single wild reading never moves it ──────────────────────── */

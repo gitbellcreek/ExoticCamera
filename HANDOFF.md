@@ -256,6 +256,33 @@ layouts: the experience's own map with the browser handed the tapped station
 whatever `browse.html` is on the default branch, since that is what Pages
 serves.
 
+**The compass after a lock (fixed 4 November 2026).** iOS restarts its motion
+sensors in a new arbitrary gyro frame when the page comes back. `js/compass.js`
+only caught that when readings ran on without a pause, which a locked phone
+never does: it kept the old north against the new frame and still reported
+itself settled. Shooting in landscape — no cross-check possible — kept the
+error for a whole visit. On 3 November that put two visits about 180° out:
+BBS-PS04 (visit 20, 09:44) and BBS-PS08 (visit 25, 11:35); the extra photos at
+BBS-PS04 were still out at 10:02 (#42) and right again by 10:06. Satellite
+imagery (PS08) and the sun (PS04) confirmed it; PS05–PS07 were right. The 19
+attachments were corrected in place on 4 November — same image, ID and
+GlobalID; slot keyword swapped (N↔S, E↔W, LOW_N↔LOW_S, LOW_E↔LOW_W; the post
+keeps LOCATOR), bearing +180° in the name and in `GPSImgDirection`:
+visit 25 #76–#84, visit 20 #33–#41, visit 21 #42.
+
+Now the tracker forgets north after a gap of 2 s, or when the app reports the
+page hidden (`tracker.interrupt()`, both apps), waits a second for Core
+Location's readings to catch up (no heading meanwhile, rather than an old one),
+and stays unsettled until a cross-check; the Photo Points camera says so on the
+picture, with how to check it (portrait, as if reading the screen — the old
+hint, "tilted towards you", described the one pose that can never check
+anything). Problem reports now carry `compass reset <why>`, `compass checked /
+not checked`, and per photo the compass state (`resets`, `why`, seconds since
+the last check). What is still assumed, not measured: what Core Location's
+heading means when the phone is upright or in landscape (`tests/compass.mjs`
+models three readings of it). A problem report sent right after a visit would
+show whether a photo was taken before the check.
+
 A finished visit can be reopened. It is a draft again until Done, carrying a
 snapshot (`reopened`) that Discard and an unchanged back-out restore; Done
 queues only what changed — new photos go to the same visit by its GlobalID,

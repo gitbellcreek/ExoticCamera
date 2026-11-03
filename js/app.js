@@ -168,7 +168,7 @@
    * is not going to produce a heading, and the shutter should stop stalling.
    */
   function firstHeading(ms) {
-    if (gotOrientation || !listening || compassDenied || headingHopeless) return Promise.resolve();
+    if (state.heading !== null || !listening || compassDenied || headingHopeless) return Promise.resolve();
     return new Promise(function (res) {
       var done = false;
       var fin = function (timedOut) {
@@ -185,7 +185,13 @@
   function onOrientation(e) {
     if (!tracker) return;
     var r = tracker.update(e, screenAngle(), e.timeStamp || performance.now());
-    if (!r || r.heading === null) return;              // relative-only, or no compass reading yet
+    if (!r) return;                                    // relative-only data
+    if (r.heading === null) {
+      // learning north again (the page was hidden): the heading from before is no heading now,
+      // and a photo taken meanwhile waits for the new one rather than taking the old
+      if (state.heading !== null && state.headingSource === 'sensor') { smooth = null; state.heading = null; renderHeading(); }
+      return;
+    }
     gotOrientation = true;
     compassDenied = headingHopeless = false;
     pushHeading(r.heading, 'sensor', r.accuracy === null ? undefined : r.accuracy);
@@ -1777,7 +1783,8 @@
     window.addEventListener('online', function () { setNet(true); });
     window.addEventListener('offline', function () { setNet(false); });
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState !== 'visible') return;
+      // iOS restarts its motion sensors when the page comes back: north must be learned again
+      if (document.visibilityState !== 'visible') { if (tracker && tracker.interrupt) tracker.interrupt(); return; }
       setNet(navigator.onLine);
       refreshCounts().then(function () {
         if (state.online && Config.get().autoSync) sync();
