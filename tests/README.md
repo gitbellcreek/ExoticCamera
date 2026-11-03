@@ -46,8 +46,8 @@ GlobalIDs and did not exist before, refuses to delete more than a run could
 have made, and puts the Test station's fields back as it found them. Do not
 delete the Test station; the suite refuses to run without it.
 
-`pp-land` and `pp-coexist` serve the app from `APP_URL` and need nothing else;
-`pp-flow` needs the token like the others.
+`pp-land`, `pp-coexist` and `pp-visit` serve the app from `APP_URL` and need
+nothing else; `pp-flow` needs the token like the others.
 
 ## What each covers
 
@@ -70,9 +70,10 @@ delete the Test station; the suite refuses to run without it.
 | `snake` | ✓ | Mostly that it stays in its lane: camera still live, shutter still works, keys stop reaching it |
 | `compass` | | The bearing on a simulated iPhone (WebKit's own angle decomposition, a noisy lagging compass): steady upright, in landscape, aimed at the ground, through turns and gyro-frame resets — with the old maths alongside for comparison |
 | `dedupe` | | A lost answer never files a point or a photo twice: the real upload path against a simulated service that drops replies |
-| `pp-upload` | | Photo Points' upload engine against a simulated service: chunk resume after a dropped connection, lost replies, an upload the service forgot, a station that must go up before its visit |
+| `pp-upload` | | Photo Points' upload engine against a simulated service: chunk resume after a dropped connection, lost replies, an upload the service forgot, a station that must go up before its visit; photos and changes added to a visit already up (or only on the layer) land on that visit, a visit reopened mid-upload stays open, a change finished mid-update is not lost |
 | `pp-land` | ✓ | Photo Points on the smallest and largest iPhones, both ways up: all ten slots in view, nothing overlapping |
 | `pp-coexist` | ✓ | Exotic Camera and Photo Points on one origin: neither deletes the other's caches or worker; Photo Points opens offline from its own cache |
+| `pp-visit` | ✓ | One trip round the post (N, ground N, E, …, then the post); going back into a finished visit from the station sheet or the queue — only what changed is queued, an unchanged back-out or Discard leaves it as it was, one open visit per station, and a visit only on the layer can be added to. Made-up layer answers; nothing is sent |
 | `pp-flow` | ✓ | Photo Points end to end against the live `Photo_Monitoring` service — see below |
 
 `fixtures/` holds six small JPEGs built with `piexif` — synthetic, no real data.

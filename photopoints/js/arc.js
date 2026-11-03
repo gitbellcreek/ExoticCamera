@@ -350,58 +350,88 @@
     },
 
     /**
-     * Fetch the most recent earlier visit's photos for a station, one per slot,
-     * scaled down, and keep them on the device for lining up the next shots.
-     * Resolves with the number of slots that now have one.
+     * A station's latest visits on the layer, newest first, each with its
+     * attachments: [{ oid, gid, attrs, atts }]. Kept on the device too, so a
+     * visit can be reopened to add to it with no signal.
      */
-    fetchGhosts: function (stationGid, skipVisitGid) {
+    stationVisits: function (stationGid) {
       var url = g.Config.visitsUrl(), t;
       return token().then(function (tok) {
         t = tok;
         return postJson(url + '/query', {
           f: 'json', token: t, where: "StationGUID = '" + stationGid + "'",
-          outFields: 'OBJECTID,GlobalID,VisitDate', orderByFields: 'VisitDate DESC,OBJECTID DESC', resultRecordCount: 5
+          outFields: '*', orderByFields: 'VisitDate DESC,OBJECTID DESC', resultRecordCount: 5
         });
       }).then(function (j) {
-        var visits = (j.features || []).map(function (f) { return f.attributes; }).filter(function (a) {
-          return !skipVisitGid || String(a.GlobalID).replace(/[{}]/g, '').toUpperCase() !== skipVisitGid.replace(/[{}]/g, '');
+        var visits = (j.features || []).map(function (f) {
+          var a = f.attributes || {};
+          return {
+            oid: a.OBJECTID, gid: '{' + String(a.GlobalID).replace(/[{}]/g, '').toUpperCase() + '}',
+            attrs: { VisitDate: a.VisitDate || a.CreationDate || null, Observer: a.Observer, MonitoringEvent: a.MonitoringEvent,
+                     PostCondition: a.PostCondition, Notes: a.Notes },
+            atts: []
+          };
         });
-        if (!visits.length) return 0;
+        if (!visits.length) return visits;
         return postJson(url + '/queryAttachments', {
-          f: 'json', token: t, objectIds: visits.map(function (v) { return v.OBJECTID; }).join(','),
+          f: 'json', token: t, objectIds: visits.map(function (v) { return v.oid; }).join(','),
           returnMetadata: true
         }).then(function (q) {
-          // newest visit first; within it, the first photo taken for each slot
           var byOid = {};
           (q.attachmentGroups || []).forEach(function (gr) { byOid[gr.parentObjectId] = gr.attachmentInfos || []; });
-          var pick = {};
           visits.forEach(function (v) {
-            (byOid[v.OBJECTID] || []).slice().sort(function (a, b) { return a.id - b.id; }).forEach(function (a) {
-              var kw = String(a.keywords || '').trim().toUpperCase();
-              if (!g.Config.slot(kw) || kw === 'MISC' || pick[kw]) return;
-              pick[kw] = { oid: v.OBJECTID, att: a, visitDate: v.VisitDate };
+            v.atts = (byOid[v.oid] || []).slice().sort(function (a, b) { return a.id - b.id; }).map(function (a) {
+              return { id: a.id, name: a.name, keywords: a.keywords || '' };
             });
           });
-          var keys = Object.keys(pick);
-          return keys.reduce(function (chain, kw) {
-            return chain.then(function (n) {
-              var p = pick[kw];
-              var src = url + '/' + p.oid + '/attachments/' + p.att.id + '?' + form({ w: 1280, token: t }).toString();
-              var ctl = typeof AbortController === 'function' ? new AbortController() : null;
-              var timer = setTimeout(function () { if (ctl) ctl.abort(); }, TIMEOUTS.edit);
-              return fetch(src, { signal: ctl ? ctl.signal : undefined }).then(function (r) {
-                clearTimeout(timer);
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.blob();
-              }).then(function (blob) {
-                return g.Store.putGhost({
-                  k: stationGid + '|' + kw, blob: blob, at: Date.now(), name: p.att.name,
-                  visitDate: p.visitDate, bearing: Arc.bearingFromName(p.att.name)
-                }).then(function () { return n + 1; });
-              }).catch(function () { clearTimeout(timer); return n; });   // one missing ghost is no reason to stop
-            });
-          }, Promise.resolve(0));
+          return visits;
         });
+      }).then(function (visits) {
+        return g.Store.set('stationVisits:' + stationGid, { at: Date.now(), list: visits })
+          .catch(function () {}).then(function () { return visits; });
+      });
+    },
+
+    /**
+     * Fetch the most recent earlier visit's photos for a station, one per slot,
+     * scaled down, and keep them on the device for lining up the next shots.
+     * `known` is a stationVisits() result already in hand. Resolves with the
+     * number of slots that now have one.
+     */
+    fetchGhosts: function (stationGid, skipVisitGid, known) {
+      var url = g.Config.visitsUrl();
+      var skip = skipVisitGid ? skipVisitGid.replace(/[{}]/g, '').toUpperCase() : null;
+      return Promise.all([known ? Promise.resolve(known) : Arc.stationVisits(stationGid), token()]).then(function (r) {
+        var visits = r[0].filter(function (v) { return !skip || v.gid.replace(/[{}]/g, '') !== skip; }), t = r[1];
+        if (!visits.length) return 0;
+        // newest visit first; within it, the first photo taken for each slot
+        var pick = {};
+        visits.forEach(function (v) {
+          v.atts.forEach(function (a) {
+            var kw = String(a.keywords || '').trim().toUpperCase();
+            if (!g.Config.slot(kw) || kw === 'MISC' || pick[kw]) return;
+            pick[kw] = { oid: v.oid, att: a, visitDate: v.attrs.VisitDate };
+          });
+        });
+        var keys = Object.keys(pick);
+        return keys.reduce(function (chain, kw) {
+          return chain.then(function (n) {
+            var p = pick[kw];
+            var src = url + '/' + p.oid + '/attachments/' + p.att.id + '?' + form({ w: 1280, token: t }).toString();
+            var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+            var timer = setTimeout(function () { if (ctl) ctl.abort(); }, TIMEOUTS.edit);
+            return fetch(src, { signal: ctl ? ctl.signal : undefined }).then(function (res) {
+              clearTimeout(timer);
+              if (!res.ok) throw new Error('HTTP ' + res.status);
+              return res.blob();
+            }).then(function (blob) {
+              return g.Store.putGhost({
+                k: stationGid + '|' + kw, blob: blob, at: Date.now(), name: p.att.name,
+                visitDate: p.visitDate, bearing: Arc.bearingFromName(p.att.name)
+              }).then(function () { return n + 1; });
+            }).catch(function () { clearTimeout(timer); return n; });   // one missing ghost is no reason to stop
+          });
+        }, Promise.resolve(0));
       });
     },
 
@@ -511,12 +541,14 @@
           });
         }, Promise.resolve());
       }).then(function () {
-        return Promise.all([g.Store.visits(), g.Store.edits()]);
+        return Promise.all([g.Store.visits(), g.Store.edits(), g.Store.shots()]);
       }).then(function (r) {
-        var waitingStations = {};
+        var waitingStations = {}, owed = {};
         r[1].forEach(function (e) { if (e.kind === 'add' && e.state !== 'sent') waitingStations[e.globalId] = true; });
+        r[2].forEach(function (s) { if (s.state !== 'sent') owed[s.visitId] = true; });
+        // a visit already up can still owe photos added to it afterwards
         var visits = r[0].filter(function (v) {
-          return v.state !== 'draft' && (v.state !== 'sent' || v.pendingEdit);
+          return v.state !== 'draft' && (v.state !== 'sent' || v.pendingEdit || owed[v.id]);
         }).sort(function (a, b) { return a.createdAt - b.createdAt; });
 
         return visits.reduce(function (chain, v) {
@@ -592,10 +624,11 @@
             throw new Error(why);
           });
         return write.then(function (oid) {
-          return g.Store.patchVisit(v.id, { objectId: oid, pendingEdit: false, state: 'uploading', lastError: null })
+          return Arc._patchVisit(v, { objectId: oid, pendingEdit: false, state: 'uploading', lastError: null })
             .then(function () { v.objectId = oid; return oid; });
         }, function (raw) {
-          return Arc._fail(g.Store.patchVisit, v, raw, sum).then(function (err) {
+          var patcher = function (id, changes) { return Arc._patchVisit(v, changes); };
+          return Arc._fail(patcher, v, raw, sum).then(function (err) {
             ev('failed', v, err);
             return null;
           });
@@ -627,12 +660,27 @@
           }).then(function (after) {
             if (after.every(function (s) { return s.state === 'sent'; })) {
               sum.sent++;
-              return g.Store.patchVisit(v.id, { state: 'sent', sentAt: Date.now(), lastError: null })
+              return Arc._patchVisit(v, { state: 'sent', sentAt: Date.now(), lastError: null })
                 .then(function () { ev('visit-sent', v); });
             }
-            return g.Store.patchVisit(v.id, { state: 'queued' });
+            return Arc._patchVisit(v, { state: 'queued' });
           });
         });
+      });
+    },
+
+    /**
+     * Record progress on a visit without trampling the phone: a visit reopened
+     * while it was going up stays a draft until it is done again, and changes
+     * made since this pass read it stay owed.
+     */
+    _patchVisit: function (v, changes) {
+      return g.Store.visit(v.id).then(function (cur) {
+        if (!cur) return null;
+        var c = Object.assign({}, changes);
+        if (cur.state === 'draft') delete c.state;
+        if (cur.finishedAt !== v.finishedAt) delete c.pendingEdit;
+        return g.Store.patchVisit(v.id, c);
       });
     },
 

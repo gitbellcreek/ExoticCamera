@@ -3,8 +3,10 @@
 Where the project stands, what is deliberate, and what is still open. `README.md`
 describes what the app *does*; this is the note for whoever picks it up next.
 
-Last worked on: 26 October 2026 (Photo Points added in `photopoints/`; compass,
-duplicate-upload and service-worker fixes here). Default branch
+Last worked on: 3 November 2026 (Photo Points: one trip round the post, and
+going back into a finished visit to add photos or change its details).
+Before that, 26 October: Photo Points added in `photopoints/`; compass,
+duplicate-upload and service-worker fixes here. Default branch
 `claude/mobile-arcgis-photo-app-6sbfip`.
 
 ## State
@@ -227,9 +229,18 @@ rather than afterwards.
 `photopoints/` is a second app on the same Pages site, for repeat photo
 monitoring against the `Photo_Monitoring` service (stations + a visits table,
 photos as keyworded attachments). Its README covers what it does and why its
-uploads are chunked and GlobalID-guarded; its four suites are in
+uploads are chunked and GlobalID-guarded; its five suites are in
 `tests/README.md`. It shares `js/compass.js`, `js/exif.js`, `js/sound.js` and
 `js/report.js` — a change to any of those is a change to both apps.
+
+A finished visit can be reopened. It is a draft again until Done, carrying a
+snapshot (`reopened`) that Discard and an unchanged back-out restore; Done
+queues only what changed — new photos go to the same visit by its GlobalID,
+the details only if they differ. The upload engine never takes a reopened
+visit out of editing (`Arc._patchVisit`), keeps a change finished while the
+previous one was in flight, and drains any visit still owed a photo even if
+it says sent. A visit only on the layer is copied onto the phone to add to
+it; its photos there count towards the slots (`serverCounts`).
 
 ## If you pick this up
 
