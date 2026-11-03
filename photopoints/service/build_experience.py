@@ -1,14 +1,18 @@
 """
 Build the photo monitoring ArcGIS Experience.
 
-Two layouts, both on the "Photo Monitoring - Field Maps" web map:
+Three layouts:
 
-  browse (default)  Station photos. Tap a station on the map and the panel
-                    beside it shows every visit's photos, by date and by
-                    direction: the Photo Points photo browser
-                    (photopoints/browse.html on the GitHub Pages site), handed
-                    the selected station's GlobalID by an Embed widget.
-  edit              Add visits from a phone. An Edit widget: tap a station,
+  frame (default)   Station photos, all in one frame. The whole page is the
+                    Photo Points photo browser (photopoints/browse.html?embed=1
+                    on the GitHub Pages site) in an Embed widget. It asks for an
+                    ArcGIS sign-in first and shows nothing until then, not even
+                    the map; then the station map, inside it, and a tap on a
+                    station shows every visit's photos, by date and direction.
+  browse            The experience's own map ("Photo Monitoring - Field Maps")
+                    with the photo browser beside it, handed the selected
+                    station's GlobalID by an Embed widget.
+  edit              Add visits from a phone, on the same web map. An Edit widget: tap a station,
                     then Visits -> Add; it uses the web map's forms, so the
                     visit form has the same keyword photo slots as Field Maps.
                     Photo Stations can have their attributes edited but cannot
@@ -19,9 +23,10 @@ goes in the item's data and the same config in config/config.json, which is
 what Experience Builder opens for further editing.
 
 Credentials come from the ARC_USER / ARC_PASS environment variables.
-    python build_experience.py --dry-run [--layout edit]   # write the config to ./out, create nothing
-    python build_experience.py [--layout edit]             # create the experience (private)
-    python build_experience.py --update <itemid>           # replace an existing one's config and title
+    python build_experience.py --dry-run [--layout browse|edit]   # write the config to ./out, create nothing
+    python build_experience.py [--layout browse|edit]             # create the experience (private)
+    python build_experience.py --update <itemid> [--layout ...]   # replace an existing one's config;
+                                                                  # it keeps its title unless --title is given
 """
 import argparse
 import io
@@ -42,10 +47,16 @@ DS = "dataSource_1"
 STATIONS_DS = f"{DS}-{STATION_LAYER}"
 MAP, PANEL = "widget_1", "widget_2"
 
+SNIPPET = "Tap a photo station to flip through its visits by date and turn round its photo directions."
+
 LAYOUTS = {
+    "frame": {
+        "title": "Photo Monitoring - Station Photos",
+        "snippet": SNIPPET,
+    },
     "browse": {
         "title": "Photo Monitoring - Station Photos",
-        "snippet": "Tap a photo station to flip through its visits by date and turn round its photo directions.",
+        "snippet": SNIPPET,
         # map | photos split per screen size: the photos get the room
         "splits": {"LARGE": ("side", 36), "MEDIUM": ("stack", 38), "SMALL": ("stack", 32)},
     },
@@ -105,6 +116,18 @@ def layouts(splits):
         out[inner_id] = {"type": "FIXED", "label": "Map FixedLayout", "content": {}, "order": []}
         page[size], map_fixed[size] = page_id, inner_id
     return out, page, map_fixed
+
+
+def frame_layouts():
+    """The one widget, edge to edge, on every screen size."""
+    out, page = {}, {}
+    for i, size in enumerate(("LARGE", "MEDIUM", "SMALL")):
+        out[f"layout_{i}"] = {"type": "FIXED", "order": ["0"], "content": {"0": {
+            "type": "WIDGET", "widgetId": PANEL,
+            "bbox": {"left": "0.0%", "right": "0.0%", "top": "0.0%", "bottom": "0.0%", "width": "100.0%", "height": "100.0%"},
+            "setting": {"autoProps": {"left": False, "right": True, "top": True, "bottom": False}, "hCenter": False, "vCenter": False}}}}
+        page[size] = f"layout_{i}"
+    return out, page
 
 
 def station_layer_config():
@@ -197,9 +220,53 @@ def browser_widget():
     }
 
 
+def frame_widget():
+    """The whole photo browser — its own sign-in, its own map — in one frame."""
+    return {
+        "uri": "widgets/common/embed/",
+        "version": EXB_VERSION,
+        "label": "Photo stations",
+        "id": PANEL,
+        "config": {
+            "embedType": "url",
+            "expression": f"<p>{BROWSER_URL}?embed=1</p>",
+            "honorThemeFont": False,
+            "enableLabel": True,
+            "label": "Photo stations: sign in, then tap a station on the map to see its photos.",
+            "enableBlankMessage": False,
+            "blankMessage": "",
+            "autoRefresh": False,
+        },
+    }
+
+
 def experience_config(webmap_title, layout):
-    lay, page_layout, map_layout = layouts(LAYOUTS[layout]["splits"])
     now = int(time.time() * 1000)
+    if layout == "frame":
+        lay, page_layout = frame_layouts()
+        return {
+            "pages": {"page_0": {"id": "page_0", "mode": "FIT_WINDOW", "type": "NORMAL", "layout": page_layout,
+                                 "isDefault": True, "isVisible": True, "label": "Page"}},
+            "layouts": lay,
+            "exbVersion": EXB_VERSION,
+            "mainSizeMode": "LARGE",
+            "theme": "themes/default/",
+            "forBuilderAttributes": {"lockLayout": False},
+            "template": "blankfullscreen",
+            "widgets": {PANEL: frame_widget()},
+            "widgetsManifest": {},
+            "views": {},
+            "sections": {},
+            "dialogs": {},
+            "messageConfigs": {},
+            "attributes": {"portalUrl": PORTAL_URL},
+            "dataSources": {},
+            "pageStructure": [{"page_0": []}],
+            "mainLocale": "en-us",
+            "timestamp": now,
+            "publishTimestamp": now,
+        }
+    lay, page_layout, map_layout = layouts(LAYOUTS[layout]["splits"])
     return {
         "pages": {"page_0": {"id": "page_0", "mode": "FIT_WINDOW", "type": "NORMAL", "layout": page_layout,
                              "isDefault": True, "isVisible": True, "label": "Page"}},
@@ -308,9 +375,9 @@ def put_draft(item_url, config):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--layout", choices=sorted(LAYOUTS), default="browse")
-    ap.add_argument("--title", help="item title (default: the layout's)")
-    ap.add_argument("--update", metavar="ITEM_ID", help="replace the config and title of an existing experience")
+    ap.add_argument("--layout", choices=sorted(LAYOUTS), default="frame")
+    ap.add_argument("--title", help="item title (default: the layout's for a new item; an updated item keeps its own)")
+    ap.add_argument("--update", metavar="ITEM_ID", help="replace the config of an existing experience")
     ap.add_argument("--dry-run", action="store_true", help="write the config to ./out and exit")
     args = ap.parse_args()
     title = args.title or LAYOUTS[args.layout]["title"]
@@ -333,6 +400,7 @@ def main():
         item = get(f"{SHARING}/content/items/{item_id}")
         if item.get("type") != "Web Experience":
             raise SystemExit(f"{item_id} is a {item.get('type')}, not a Web Experience")
+        title = args.title or item.get("title") or title        # someone may have renamed it: keep their name
         folder = item.get("ownerFolder")
         item_url = f"{SHARING}/content/users/{user}" + (f"/{folder}" if folder else "") + f"/items/{item_id}"
         post(f"{item_url}/update", text=json.dumps(config), typeKeywords=",".join(type_keywords()),

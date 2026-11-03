@@ -2,10 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob: data:; connect-src 'self' https://*.arcgis.com; frame-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://js.arcgis.com; style-src 'self' 'unsafe-inline' https://js.arcgis.com; img-src 'self' blob: data: https://*.arcgis.com https://*.arcgisonline.com; connect-src 'self' https://*.arcgis.com https://*.arcgisonline.com; font-src 'self' data: https://js.arcgis.com https://*.arcgis.com; worker-src 'self' blob: https://js.arcgis.com; frame-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0d1117">
-<title>Photo Points — photos</title>
+<meta name="theme-color" content="#ffffff">
+<title>Photo stations</title>
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <link rel="stylesheet" href="browse.css">
@@ -13,9 +13,9 @@
 <body>
 
 <header class="bar">
-  <a id="b-back" class="iconbtn" href="./" aria-label="Back to Photo Points">‹</a>
+  <a id="b-back" class="iconbtn hidden" href="./" aria-label="Back">‹</a>
   <div class="title">
-    <b id="b-title">Photos</b>
+    <b id="b-title">Photo stations</b>
     <span id="b-sub"></span>
   </div>
   <div class="seg modes hidden" id="b-modes" role="group" aria-label="How to show the photos">
@@ -23,7 +23,7 @@
     <button data-mode="side" title="Two dates side by side (2)">Side by side</button>
     <button data-mode="swipe" title="Two dates, swipe between them (3)">Swipe</button>
   </div>
-  <button id="b-list-btn" class="iconbtn" aria-label="All stations" title="All stations">☰</button>
+  <button id="b-list-btn" class="iconbtn hidden" aria-label="List of stations" title="List of stations">☰</button>
 </header>
 
 <main>
@@ -35,14 +35,18 @@
         <figure class="pane" id="pane-a">
           <img alt="" decoding="async">
           <div class="empty"></div>
+          <div class="slotlabel" aria-hidden="true"></div>
           <figcaption></figcaption>
-          <button class="multi hidden" aria-label="Next photo in this slot"></button>
+          <button class="fullbtn" aria-label="Full size" title="Full size (F)">⤢</button>
+          <div class="pager hidden"><button class="pg-prev" aria-label="Previous photo in this slot">‹</button><span></span><button class="pg-next" aria-label="Next photo in this slot">›</button></div>
         </figure>
         <figure class="pane" id="pane-b">
           <img alt="" decoding="async">
           <div class="empty"></div>
+          <div class="slotlabel" aria-hidden="true"></div>
           <figcaption></figcaption>
-          <button class="multi hidden" aria-label="Next photo in this slot"></button>
+          <button class="fullbtn" aria-label="Full size" title="Full size (F)">⤢</button>
+          <div class="pager hidden"><button class="pg-prev" aria-label="Previous photo in this slot">‹</button><span></span><button class="pg-next" aria-label="Next photo in this slot">›</button></div>
         </figure>
         <div class="divider hidden" id="b-divider" aria-hidden="true"></div>
         <button class="turn left" id="b-turn-left" aria-label="Turn left">‹</button>
@@ -78,8 +82,13 @@
 
       <dl class="details" id="b-details"></dl>
       <button class="linkish signout">Sign out of ArcGIS on this device</button>
-      <p class="keys"><span class="k-keys">← → turn · ↑ ↓ date · G ground · P post · M misc · 1 2 3 view</span><span class="k-touch">Swipe the photo sideways to turn, up or down to change the date</span></p>
+      <p class="keys"><span class="k-keys">← → turn (at Post and Misc: the next photo) · N E S W face · [ ] photos in this slot · ↑ ↓ date · G ground · P post · M misc · F full size · 1 2 3 view</span><span class="k-touch">Swipe the photo sideways to turn (at Post and Misc: the next photo), up or down to change the date</span></p>
     </div>
+  </section>
+
+  <section id="b-map" class="mapview hidden" aria-label="Map of the photo stations">
+    <div id="b-mapdiv"></div>
+    <button class="mapbtn" id="b-locate" aria-label="Zoom to where I am" title="Zoom to where I am">◎</button>
   </section>
 
   <section id="b-list" class="list hidden" aria-label="Stations">
@@ -106,7 +115,10 @@
 <div id="b-full" class="full hidden" role="dialog" aria-modal="true" aria-label="Full size">
   <div class="full-bar">
     <span id="b-full-name"></span>
-    <button class="iconbtn" id="b-full-close" aria-label="Close">✕</button>
+    <button class="iconbtn hidden" id="b-zoom-out" aria-label="Zoom out" title="Zoom out (−)">−</button>
+    <button class="iconbtn hidden" id="b-zoom-fit" aria-label="The whole photo" title="The whole photo (0)">⤢</button>
+    <button class="iconbtn hidden" id="b-zoom-in" aria-label="Zoom in" title="Zoom in (+, or scroll, pinch or double-tap)">+</button>
+    <button class="iconbtn" id="b-full-close" aria-label="Close" title="Close (Esc)">✕</button>
   </div>
   <div class="full-body" id="b-full-body"></div>
 </div>

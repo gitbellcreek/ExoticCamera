@@ -4,8 +4,9 @@ Where the project stands, what is deliberate, and what is still open. `README.md
 describes what the app *does*; this is the note for whoever picks it up next.
 
 Last worked on: 3 November 2026 (Photo Points: one trip round the post;
-going back into a finished visit; a photo browser, and the ArcGIS Experience
-reworked around it).
+going back into a finished visit; a photo browser — with its own station map,
+zoomable full size and a light theme — and the ArcGIS Experience reduced to
+one frame holding it).
 Before that, 26 October: Photo Points added in `photopoints/`; compass,
 duplicate-upload and service-worker fixes here. Default branch
 `claude/mobile-arcgis-photo-app-6sbfip`.
@@ -234,13 +235,26 @@ uploads are chunked and GlobalID-guarded; its five suites are in
 `tests/README.md`. It shares `js/compass.js`, `js/exif.js`, `js/sound.js` and
 `js/report.js` — a change to any of those is a change to both apps.
 
-`photopoints/browse.html` is a read-only photo browser (dates × directions,
-side-by-side and swipe compare). The private ArcGIS Experience *Photo
-Monitoring - Station Photos* embeds it next to the station map, passing the
-selected station's GlobalID in the Embed widget's URL; it is built by
-`photopoints/service/build_experience.py`, which can also rebuild the earlier
-add-visits layout (`--layout edit`). The Experience only works once
-`browse.html` is on the default branch, since that is what Pages serves.
+`photopoints/browse.html` is a read-only photo browser: a station map (the
+*Photo Monitoring - Field Maps* web map, drawn with the ArcGIS Maps SDK 5.1
+from js.arcgis.com once signed in), then dates × directions with
+side-by-side and swipe compare and a zoomable full size. The SDK is handed the
+page's token with `IdentityManager.registerToken` for the portal and the
+layer's server; the page's security policy allows `'wasm-unsafe-eval'`
+because the SDK's MapView needs WebAssembly (it allows compiling WebAssembly,
+not evaluating script). The SDK probes `new Function` once at start-up, which
+the policy refuses and reports; the SDK then takes its no-eval path, so that
+one report is expected. Without the SDK the station list stands in.
+
+The private ArcGIS Experience *Photo Monitoring - Station Photos _ beta 2*
+(`ce3fd77cef4e4d27b2e04f6d68c377ca`; its owner renamed it) is a single Embed
+widget filling the page with `browse.html?embed=1`, so nothing shows until the
+browser's own sign-in. It is built by `photopoints/service/build_experience.py`
+(`--update` keeps the item's title), which can also rebuild the earlier
+layouts: the experience's own map with the browser handed the tapped station
+(`--layout browse`), and add visits (`--layout edit`). The Experience shows
+whatever `browse.html` is on the default branch, since that is what Pages
+serves.
 
 A finished visit can be reopened. It is a draft again until Done, carrying a
 snapshot (`reopened`) that Discard and an unchanged back-out restore; Done
