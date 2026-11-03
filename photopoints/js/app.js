@@ -147,6 +147,8 @@
     return o && typeof o.angle === 'number' ? o.angle : (window.orientation || 0);
   }
 
+  var compassResets = 0, compassChecked = false;
+
   function onOrientation(e) {
     if (!tracker) return;
     var r = tracker.update(e, screenAngle(), e.timeStamp || performance.now());
@@ -155,6 +157,19 @@
     state.roll = r.roll;
     state.settled = r.settled;
     state.accuracy = r.accuracy;
+    // for problem reports: when north had to be learned again, and when it was checked
+    if (tracker.resets !== undefined && tracker.resets !== compassResets) { compassResets = tracker.resets; Report.note('compass reset', tracker.resetWhy); }
+    if (r.settled !== compassChecked) {
+      compassChecked = r.settled;
+      Report.note('compass', r.settled ? 'checked' : 'not checked');
+      if (r.settled && state.view === 'cam') { Sound.tick(); toast('Compass checked ✓', 'ok', 1800); }
+    }
+    if (r.heading === null && r.mode === 'fused' && state.mag !== null) {
+      // learning north again (the page was hidden): the heading from before is no heading now,
+      // and a photo taken meanwhile waits for the new one rather than taking the old
+      state.mag = null;
+      state.heading = null;
+    }
     if (r.heading !== null) {
       gotOrientation = true;
       compassDenied = headingHopeless = false;
@@ -167,7 +182,7 @@
   }
 
   function firstHeading(ms) {
-    if (gotOrientation || !listening || compassDenied || headingHopeless) return Promise.resolve();
+    if (state.mag !== null || !listening || compassDenied || headingHopeless) return Promise.resolve();
     return new Promise(function (res) {
       var done = false;
       var fin = function (timedOut) {
@@ -310,7 +325,7 @@
     var txt, cls;
     if (state.heading === null) { txt = gotOrientation ? 'compass…' : 'compass off'; cls = 'bad'; }
     else if (state.accuracy !== null && state.accuracy > 25) { txt = 'compass ±' + Math.round(state.accuracy) + '°'; cls = 'warn'; }
-    else if (!state.settled) { txt = 'compass settling'; cls = 'warn'; }
+    else if (!state.settled) { txt = 'compass not checked'; cls = 'warn'; }
     else { txt = 'compass ✓'; cls = 'ok'; }
     if (txt + cls === lastCal) return;
     lastCal = txt + cls;
@@ -900,9 +915,18 @@
     renderAim();
   }
 
+  /* How to let the compass check north: the phone's top and back must both
+     point roughly the same way, which they do in the reading pose — not
+     upright, not in landscape. */
+  var CHECK_HOW = 'hold the phone in portrait, tilted as if you were reading it, for a second.';
+
   var wasOn = false;
   function renderAim() {
     if (state.view !== 'cam') return;
+    // until north is checked, say so on the picture, with what to do about it
+    var unchecked = gotOrientation && !state.settled;
+    $('aim-check').classList.toggle('hidden', !unchecked);
+    if (unchecked) $('aim-check').textContent = 'Compass not checked — ' + CHECK_HOW;
     var t = state.target, h = state.heading, el = $('aim-text');
     var tol = +Config.get().tolerance || 5;
     var on = false;
@@ -1149,6 +1173,8 @@
     });
   }
 
+  var uncheckedWarned = null;             // the visit already told a photo was taken with north unchecked
+
   function saveShot(img, snap) {
     var v = state.visit;
     var pos = photoPosition();
@@ -1175,7 +1201,11 @@
       return Store.addShot(shot, blob);
     }).then(function () {
       state.shots.push(shot);
-      Report.note('photo', { slot: shot.slot, hdg: shot.heading, settled: shot.compassSettled, px: img.w + 'x' + img.h });
+      Report.note('photo', { slot: shot.slot, hdg: shot.heading, settled: shot.compassSettled, compass: tracker && tracker.diag ? tracker.diag(performance.now()) : null, px: img.w + 'x' + img.h });
+      if (shot.heading !== null && !shot.compassSettled && uncheckedWarned !== v.id) {
+        uncheckedWarned = v.id;               // once a visit: the banner on the picture says it all along
+        toast('Taken before the compass was checked — its direction may be off. To check it, ' + CHECK_HOW, 'warn', 6000);
+      }
       Sound.queued();
       renderSlots();
       renderReviewThumb(true);
@@ -2061,7 +2091,7 @@
       }
       toast(state.settled
         ? 'Compass is steady. Bearings are ' + (Config.ref() === 'T' ? 'true (declination ' + Config.get().declination + '°)' : 'magnetic') + '.'
-        : 'Compass is settling — hold the phone tilted towards you for a moment so it can check north.', state.settled ? 'ok' : 'warn', 4500);
+        : 'Compass not checked yet — ' + CHECK_HOW, state.settled ? 'ok' : 'warn', 5000);
     });
     $('compass').addEventListener('click', function () { Sound.unlock(); if (state.heading === null) startCompass(); });
 
@@ -2178,7 +2208,11 @@
     window.addEventListener('online', function () { setNet(true); });
     window.addEventListener('offline', function () { setNet(false); });
     document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState !== 'visible') { if (state.view === 'cam') stopCamera(true); return; }
+      if (document.visibilityState !== 'visible') {
+        if (tracker && tracker.interrupt) tracker.interrupt();     // iOS restarts its motion sensors when the page comes back: north must be checked again
+        if (state.view === 'cam') stopCamera(true);
+        return;
+      }
       setNet(navigator.onLine);
       refreshCounts().then(function () { if (state.online && Config.get().autoSync) sync(); });
       if (state.view === 'cam') startCamera();

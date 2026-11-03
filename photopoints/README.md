@@ -134,6 +134,20 @@ upright; `tests/compass.mjs` measures the difference on a simulated iPhone
 (86° → 1° at the 95th percentile). Aimed at the ground, the bearing is the
 direction of the top of the photo, which is what a groundcover shot faces.
 
+**Checking north.** iOS restarts its motion sensors, from a new arbitrary
+starting point, whenever the page comes back after the phone was locked or
+another app was in front. The compass then learns north again from scratch: no
+heading for about a second, then a provisional one, and the camera says
+*Compass not checked* until it is confirmed. To confirm it, hold the phone in
+portrait, tilted as if you were reading it, for a second — the phone's top and
+back then point the same way, so iOS's compass reading can be checked against
+the gyro. Upright or in landscape it cannot be. A photo taken before the check
+keeps its bearing (usually right) and the visit warns once; *Compass checked ✓*
+says when it is done. Until 4 November 2026 the restart went unnoticed after a
+lock: north stayed wherever the new starting point put it, and the compass
+still said ✓ — two visits on 3 November came out about 180° out and were
+corrected on the layer (see `HANDOFF.md`).
+
 Bearings are **true north** by default: the phone's magnetic bearing plus the
 declination, −6.3° for Hillsborough County in 2026 (NOAA WMM-2025; it changes
 by about −0.08° a year). Settings switches to magnetic. Every photo carries its

@@ -245,6 +245,94 @@ try {
   else ok('queued as the April visit on the layer — photos only, its details untouched');
   if ((await shotsOf(a.id)).length !== 1) fail('photos: ' + (await shotsOf(a.id)).length); else ok('one photo to add to it');
 
+  step('the compass after the phone was locked: north learned again, and said so until checked');
+  // A simulated iPhone: CoreMotion's attitude in an arbitrary gyro frame, split into alpha/beta/gamma
+  // as WebKit does, and Core Location's heading (the top of the phone while near level, else its back).
+  // What went wrong on 3 Nov 2026: north checked, the phone locked on the way to the next post, iOS
+  // back with a new gyro frame — and the old code kept the old north, 180° out, still saying "✓".
+  await page.evaluate(() => {
+    const D = Math.PI / 180;
+    const Rz = (a) => { const c = Math.cos(a * D), s = Math.sin(a * D); return [c, -s, 0, s, c, 0, 0, 0, 1]; };
+    const Rx = (a) => { const c = Math.cos(a * D), s = Math.sin(a * D); return [1, 0, 0, 0, c, -s, 0, s, c]; };
+    const mul = (A, B) => { const C = Array(9).fill(0); for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) for (let k = 0; k < 3; k++) C[r * 3 + c] += A[r * 3 + k] * B[k * 3 + c]; return C; };
+    const brg = (x, y) => ((Math.atan2(x, y) / D) % 360 + 360) % 360;
+    window.__pose = { yaw: 30, pitch: -50, quarter: 0 };          // looking at the screen
+    window.__frame = 130;
+    // a hand moves between poses, it does not teleport: at most 4° a reading (120°/s) on each axis
+    const step = (a, b) => a + Math.max(-4, Math.min(4, b - a));
+    window.__pump = () => {
+      window.__cur = { ...window.__pose };                         // after a pause the person is wherever they are now
+      return setInterval(() => {
+      const c = window.__cur, w = window.__pose;
+      c.yaw = step(c.yaw, w.yaw); c.pitch = step(c.pitch, w.pitch); c.quarter = step(c.quarter, w.quarter);
+      const p = c;
+      const truth = mul(mul(mul(Rz(-p.yaw), [1, 0, 0, 0, 0, -1, 0, 1, 0]), Rx(p.pitch)), Rz(p.quarter));
+      const R = mul(Rz(window.__frame), truth);
+      let z, x, y;
+      if (R[8] > 0) { z = Math.atan2(-R[1], R[4]); x = Math.asin(R[7]); y = Math.atan2(-R[6], R[8]); }
+      else { z = Math.atan2(R[1], -R[4]); x = -Math.asin(R[7]); x += x >= 0 ? -Math.PI : Math.PI; y = Math.atan2(R[6], -R[8]); }
+      const top = [truth[1], truth[4], truth[7]], back = [-truth[2], -truth[5], -truth[8]];
+      const H = Math.hypot(top[0], top[1]) >= Math.SQRT1_2 ? brg(top[0], top[1]) : brg(back[0], back[1]);
+      const e = new Event('deviceorientation');
+      Object.assign(e, { alpha: ((z / D) + 360) % 360, beta: x / D, gamma: y / D, absolute: false, webkitCompassHeading: H, webkitCompassAccuracy: 8 });
+      window.dispatchEvent(e);
+    }, 33);
+    };
+    window.__pumping = window.__pump();
+  });
+  await page.waitForTimeout(2500);
+  const c0 = await page.evaluate(() => ({ settled: PhotoPoints.state.settled, mag: PhotoPoints.state.mag }));
+  if (!c0.settled || Math.abs(c0.mag - 30) > 2) fail('north at home: ' + JSON.stringify(c0)); else ok(`north checked while looking at the screen (${c0.mag.toFixed(1)}° magnetic)`);
+  await page.locator('.st').first().click();
+  await page.click('#sp-start');
+  await camera();
+  if (await page.isVisible('#aim-check')) fail('"not checked" shown with north checked'); else ok('no warning on the picture while north is checked');
+  await page.evaluate(() => { window.__pose = { yaw: 30, pitch: 3, quarter: 90 }; });   // as for the photos: landscape, upright
+  await page.waitForTimeout(1500);
+  if (!(await page.evaluate(() => PhotoPoints.state.settled))) fail('turning the phone to landscape cost the check'); else ok('turned to landscape: still checked');
+  // locked on the way to the next post: no readings at all, then iOS back with a new gyro frame, facing somewhere else
+  await page.evaluate(() => {
+    clearInterval(window.__pumping);
+    Object.defineProperty(document, 'visibilityState', { get: () => 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await page.waitForTimeout(2500);
+  await page.evaluate(() => {
+    window.__frame += 180;
+    window.__pose = { yaw: 120, pitch: 3, quarter: 90 };
+    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.__pumping = window.__pump();
+  });
+  const blank = await page.waitForFunction(() => document.getElementById('heading-deg').textContent === '---', null, { timeout: 1500 }).then(() => true, () => false);
+  if (!blank) fail('kept showing the heading from before the lock'); else ok('back from the lock: no heading for a moment, not the old one');
+  await camera();
+  await page.waitForFunction(() => document.getElementById('heading-deg').textContent !== '---', null, { timeout: 4000 });
+  const c1 = await page.evaluate(() => ({ heading: PhotoPoints.state.heading, banner: !document.getElementById('aim-check').classList.contains('hidden'),
+    text: document.getElementById('aim-check').textContent, chip: document.getElementById('chip-cal').textContent }));
+  if (Math.abs(((c1.heading - 113.7) % 360 + 540) % 360 - 180) > 3) fail('heading after the lock: ' + c1.heading); else ok(`then the new heading, right: ${c1.heading.toFixed(1)}° true (facing 120° magnetic)`);
+  if (!c1.banner || !/^Compass not checked — hold the phone in portrait, tilted as if you were reading it/.test(c1.text) || c1.chip !== 'compass not checked') fail('after the lock: ' + JSON.stringify(c1));
+  else ok('and says on the picture that north is not checked, and how to check it');
+  await snap('compass-unchecked');
+  const vid = await page.evaluate(() => PhotoPoints.state.visit.id);
+  await shoot();
+  const shot = (await shotsOf(vid)).pop();
+  const warned = await page.evaluate(() => [...document.querySelectorAll('.toast')].some((t) => /^Taken before the compass was checked/.test(t.textContent)));
+  if (!shot || shot.compassSettled || Math.abs(((shot.heading - 113.7) % 360 + 540) % 360 - 180) > 3) fail('the shot: ' + JSON.stringify(shot && { h: shot.heading, s: shot.compassSettled }));
+  else ok(`a shot taken meanwhile has the right bearing (${shot.heading}°), marked as taken before the check`);
+  if (!warned) fail('no warning that the photo was taken before the check'); else ok('and the first such shot of the visit says so');
+  await page.evaluate(() => { window.__pose = { yaw: 120, pitch: -50, quarter: 0 }; });   // one look at the screen
+  await page.waitForFunction(() => PhotoPoints.state.settled, null, { timeout: 5000 });
+  await page.waitForTimeout(300);
+  const c2 = await page.evaluate(() => ({ banner: !document.getElementById('aim-check').classList.contains('hidden'), chip: document.getElementById('chip-cal').textContent,
+    toast: [...document.querySelectorAll('.toast')].some((t) => t.textContent === 'Compass checked ✓'),
+    crumbs: self.Report.breadcrumbs().filter((c) => /^compass|^photo$/.test(c.m)).map((c) => c.m + (c.x ? ' ' + c.x : '')) }));
+  if (c2.banner || c2.chip !== 'compass ✓' || !c2.toast) fail('after one look at the screen: ' + JSON.stringify(c2)); else ok('one look at the screen: "Compass checked ✓", and the warning goes');
+  const crumbs = c2.crumbs.join(' | ');
+  if (!/compass reset hidden/.test(crumbs) || !/"settled":false,"compass":\{"settled":false,"resets":1,"why":"hidden"/.test(crumbs) || !/compass checked/.test(crumbs)) fail('breadcrumbs: ' + crumbs);
+  else ok('a problem report would show it: the reset, the photo taken before the check, the check');
+  await page.evaluate(() => clearInterval(window.__pumping));
+
   if (writes.length) fail('tried to write: ' + writes.join(', ')); else ok('nothing was sent anywhere');
   if (errs.length) fail('page errors: ' + errs.join(' | ')); else ok('no page errors');
 } catch (e) {

@@ -125,6 +125,9 @@
   var WEAK = 0.35;            // below this its horizontal direction is noise
   var TURN = 60;              // degrees per second: a real turn, not a hand wandering — the magnetometer is ignored
   var QUIET = 0.6;            // seconds after a turn before it is consulted again — Core Location catches up
+  var GAP = 2000;             // ms with no reading at all: the page was hidden or the phone locked (see update)
+  var REWAIT = 1000;          // ms after starting again before north is learned: Core Location's first readings are old ones
+  var FRESH = 30;             // readings averaged into a first guess, rather than trusting the first one alone
 
   function strength(h) { return clamp((h - WEAK) / (STRONG - WEAK), 0, 1); }
 
@@ -149,6 +152,46 @@
     this.hist = [];
     this.accuracy = null;
     this.calibratedAt = null;
+    this.checkedAt = null;                // last reading cross-checked against the gyro (both axes agreeing)
+    this.resets = 0;                      // times north had to be learned again, and why the last time
+    this.resetWhy = null;
+    this.interrupted = false;
+    this.waitUntil = 0;
+    this.fresh = null;                    // readings averaged since the first guess, while fewer than FRESH
+  };
+
+  /**
+   * The page was hidden — the screen locked, another app in front. iOS stops
+   * motion updates then and starts them again, in a new arbitrary gyro frame,
+   * when the page is shown: call this from a visibilitychange to 'hidden', so
+   * the next reading learns north again rather than trusting the old frame.
+   */
+  Tracker.prototype.interrupt = function () { this.interrupted = true; };
+
+  /**
+   * Everything learned against the old gyro frame is void. Core Location
+   * restarts too, and its first readings are where the phone pointed before:
+   * learn north again only once they have caught up — no heading for a moment
+   * rather than a wrong one.
+   */
+  Tracker.prototype.forget = function (why, t) {
+    if (this.offset !== null) { this.resets++; this.resetWhy = why; }
+    this.waitUntil = t + REWAIT;
+    this.fresh = null;
+    this.offset = null;
+    this.settled = false;
+    this.confirm = 0;
+    this.hist = [];
+    this.cand = null;
+    this.candFor = 0;
+  };
+
+  /** How the compass stands, compactly, for problem reports: `checked` is seconds since the last cross-check. */
+  Tracker.prototype.diag = function (now) {
+    return {
+      settled: this.settled, resets: this.resets, why: this.resetWhy,
+      checked: this.checkedAt === null ? null : Math.round((now - this.checkedAt) / 100) / 10
+    };
   };
 
   /**
@@ -192,21 +235,28 @@
     var t = typeof now === 'number' ? now : Date.now();
     var dt = this.lastT === null ? 1 / 60 : clamp((t - this.lastT) / 1000, 0, 0.25);
 
-    /* A jump no hand could make — tens of degrees between two samples a frame
-       apart — is iOS restarting its gyro frame (motion updates stop and start
-       when the page is hidden and shown), not the phone moving. Everything
-       learned against the old frame is void: start again from this sample. */
+    /* iOS stops motion updates while the page is hidden (the screen locked,
+       another app in front) and starts them again, in a new arbitrary gyro
+       frame, when it is shown. Everything learned against the old frame is
+       then void: start again from this sample. That shows up three ways:
+       - the app says the page was hidden (interrupt);
+       - readings stop for a while — a locked phone sends none, and a photo
+         being saved holds them up for well under a second;
+       - a jump no hand could make, tens of degrees between two samples a
+         frame apart (motion updates restarted with the page still shown).
+       Only the last was caught at first, and a locked phone never produces
+       it: north stayed wherever the new frame happened to put it — once
+       about 180° out — while the tracker went on saying it was settled. */
     var prev = this.hist.length ? this.hist[this.hist.length - 1] : null;
-    if (this.mode === 'fused' && prev && t - prev.t < 100) {
-      var jump = rotation(prev.R, R);
-      if (jump > 20 && jump / Math.max((t - prev.t) / 1000, 1 / 120) > 1500) {
-        this.offset = null;
-        this.settled = false;
-        this.hist = [];
-        this.cand = null;
-        this.candFor = 0;
+    if (this.mode === 'fused') {
+      if (this.interrupted) this.forget('hidden', t);
+      else if (prev && t - prev.t > GAP) this.forget('pause', t);
+      else if (prev && t - prev.t < 100) {
+        var jump = rotation(prev.R, R);
+        if (jump > 20 && jump / Math.max((t - prev.t) / 1000, 1 / 120) > 1500) this.forget('jump', t);
       }
     }
+    this.interrupted = false;
     this.lastT = t;
 
     var spin = this.turnRate(R, t);
@@ -256,6 +306,7 @@
   }
 
   Tracker.prototype.learn = function (R, H, dt, spin, acc) {
+    if (this.offset === null && this.lastT < this.waitUntil) return;
     var cs = candidates(R, H);
     if (!cs.length) return;
     var both = cs.length === 2;
@@ -276,6 +327,7 @@
       this.confirm = 0;
       this.quiet = QUIET;                                     // nothing has moved yet: learn straight away
       this.calibratedAt = this.lastT;
+      this.fresh = 0;
       return;
     }
 
@@ -313,9 +365,12 @@
       var w = base * still;
       if (acc !== null && acc > 15) w *= clamp(1 - (acc - 15) / 40, 0.25, 1);   // a poorly calibrated magnetometer
       var tau = this.settled ? this.tau : this.tau / 3;      // converge quickly from a first guess
-      this.offset = wrap180(this.offset + w * (1 - Math.exp(-dt / tau)) * innov);
+      var k = w * (1 - Math.exp(-dt / tau));
+      // the first guess is one noisy reading: average the next few into it outright
+      if (this.fresh !== null && this.fresh < FRESH) k = Math.max(k, 1 / (++this.fresh + 1));
+      this.offset = wrap180(this.offset + k * innov);
       if (agree) {
-        this.calibratedAt = this.lastT;
+        this.calibratedAt = this.checkedAt = this.lastT;
         if (Math.abs(innov) <= 6 && ++this.confirm >= 20) this.settled = true;
       }
       this.cand = null;
@@ -338,6 +393,7 @@
     }
     if (this.candFor >= this.reacquire) {
       this.offset = this.cand;
+      this.fresh = 0;
       this.settled = false;
       this.confirm = 0;
       this.cand = null;
