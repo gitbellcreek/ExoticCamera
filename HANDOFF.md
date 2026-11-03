@@ -3,8 +3,9 @@
 Where the project stands, what is deliberate, and what is still open. `README.md`
 describes what the app *does*; this is the note for whoever picks it up next.
 
-Last worked on: 3 November 2026 (Photo Points: one trip round the post, and
-going back into a finished visit to add photos or change its details).
+Last worked on: 3 November 2026 (Photo Points: one trip round the post;
+going back into a finished visit; a photo browser, and the ArcGIS Experience
+reworked around it).
 Before that, 26 October: Photo Points added in `photopoints/`; compass,
 duplicate-upload and service-worker fixes here. Default branch
 `claude/mobile-arcgis-photo-app-6sbfip`.
@@ -232,6 +233,14 @@ photos as keyworded attachments). Its README covers what it does and why its
 uploads are chunked and GlobalID-guarded; its five suites are in
 `tests/README.md`. It shares `js/compass.js`, `js/exif.js`, `js/sound.js` and
 `js/report.js` — a change to any of those is a change to both apps.
+
+`photopoints/browse.html` is a read-only photo browser (dates × directions,
+side-by-side and swipe compare). The private ArcGIS Experience *Photo
+Monitoring - Station Photos* embeds it next to the station map, passing the
+selected station's GlobalID in the Embed widget's URL; it is built by
+`photopoints/service/build_experience.py`, which can also rebuild the earlier
+add-visits layout (`--layout edit`). The Experience only works once
+`browse.html` is on the default branch, since that is what Pages serves.
 
 A finished visit can be reopened. It is a draft again until Done, carrying a
 snapshot (`reopened`) that Discard and an unchanged back-out restore; Done

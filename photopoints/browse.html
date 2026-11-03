@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>Photo Points — photos</title>
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="browse.css">
+</head>
+<body>
+
+<header class="bar">
+  <a id="b-back" class="iconbtn" href="./" aria-label="Back to Photo Points">‹</a>
+  <div class="title">
+    <b id="b-title">Photos</b>
+    <span id="b-sub"></span>
+  </div>
+  <div class="seg modes hidden" id="b-modes" role="group" aria-label="How to show the photos">
+    <button data-mode="one" class="on" title="One photo (1)">One</button>
+    <button data-mode="side" title="Two dates side by side (2)">Side by side</button>
+    <button data-mode="swipe" title="Two dates, swipe between them (3)">Swipe</button>
+  </div>
+  <button id="b-list-btn" class="iconbtn" aria-label="All stations" title="All stations">☰</button>
+</header>
+
+<main>
+  <p class="msg hidden" id="b-msg"></p>
+
+  <section id="b-viewer" class="viewer hidden" aria-label="Photos at this station">
+    <div class="stage-wrap">
+      <div class="stage one" id="b-stage">
+        <figure class="pane" id="pane-a">
+          <img alt="" decoding="async">
+          <div class="empty"></div>
+          <figcaption></figcaption>
+          <button class="multi hidden" aria-label="Next photo in this slot"></button>
+        </figure>
+        <figure class="pane" id="pane-b">
+          <img alt="" decoding="async">
+          <div class="empty"></div>
+          <figcaption></figcaption>
+          <button class="multi hidden" aria-label="Next photo in this slot"></button>
+        </figure>
+        <div class="divider hidden" id="b-divider" aria-hidden="true"></div>
+        <button class="turn left" id="b-turn-left" aria-label="Turn left">‹</button>
+        <button class="turn right" id="b-turn-right" aria-label="Turn right">›</button>
+      </div>
+      <input type="range" class="split hidden" id="b-split" min="0" max="100" value="50" aria-label="Swipe between the two dates">
+      <div class="dates" role="group" aria-label="Visit date">
+        <button class="step" id="b-older" aria-label="Earlier visit">‹</button>
+        <div class="chips" id="b-chips"></div>
+        <button class="step" id="b-newer" aria-label="Later visit">›</button>
+      </div>
+      <label class="with hidden" id="b-with-row"><span>Compare with</span><select id="b-with"></select></label>
+    </div>
+
+    <div class="side">
+      <div class="dirs" role="group" aria-label="Direction">
+        <div class="rose" id="b-rose">
+          <button data-dir="N" class="n">N</button>
+          <button data-dir="W" class="w">W</button>
+          <button data-dir="E" class="e">E</button>
+          <button data-dir="S" class="s">S</button>
+          <div class="seg level" id="b-level" role="group" aria-label="Eye level or groundcover">
+            <button data-level="eye" class="on" title="Eye level (G toggles)">Eye</button>
+            <button data-level="ground" title="Groundcover (G toggles)">Ground</button>
+          </div>
+        </div>
+        <div class="extras">
+          <button data-dir="LOCATOR" title="The post (P)">Post</button>
+          <button data-dir="MISC" title="Anything else (M)">Misc</button>
+        </div>
+      </div>
+
+
+      <dl class="details" id="b-details"></dl>
+      <p class="keys"><span class="k-keys">← → turn · ↑ ↓ date · G ground · P post · M misc · 1 2 3 view</span><span class="k-touch">Swipe the photo sideways to turn, up or down to change the date</span></p>
+    </div>
+  </section>
+
+  <section id="b-list" class="list hidden" aria-label="Stations">
+    <input type="search" id="b-search" placeholder="Search stations" autocomplete="off">
+    <p class="hint" id="b-list-status"></p>
+    <div id="b-stations" role="list"></div>
+  </section>
+
+  <section id="b-signin" class="signin hidden" aria-label="Sign in">
+    <h2>Sign in to ArcGIS</h2>
+    <p class="hint">The photos are in the Photo_Monitoring layer, which needs an ArcGIS account. Only the resulting token is kept.</p>
+    <label class="fld"><span>Username</span><input type="text" id="si-user" autocomplete="username" spellcheck="false" autocapitalize="off"></label>
+    <label class="fld"><span>Password</span><input type="password" id="si-pass" autocomplete="current-password"></label>
+    <button class="btn" id="si-go">Sign in</button>
+    <details>
+      <summary>Paste a token</summary>
+      <label class="fld"><span>Token</span><input type="text" id="si-token" spellcheck="false" autocapitalize="off"></label>
+      <button class="btn ghost" id="si-token-go">Use token</button>
+    </details>
+  </section>
+</main>
+
+<script src="js/config.js"></script>
+<script src="js/store.js"></script>
+<script src="js/arc.js"></script>
+<script src="js/browse.js"></script>
+</body>
+</html>

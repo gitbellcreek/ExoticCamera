@@ -592,6 +592,11 @@
       : 'https://www.google.com/maps/dir/?api=1&destination=' + s.lat + ',' + s.lon + '&travelmode=walking';
     $('sp-maps').href = maps;
     $('sp-maps').classList.toggle('hidden', s.lat === null);
+    var photos = $('sp-photos');
+    if (photos) {                                  // every visit's photos, by date and direction
+      photos.href = 'browse.html?station=' + encodeURIComponent(gid);
+      photos.classList.toggle('hidden', !!s.pending);
+    }
     renderStationGuide();
     renderGhostNote(s);
     renderStationVisits(s);
