@@ -44,8 +44,11 @@ Cypress Creek 2020) into 48 stations; they read credentials from `ARC_USER` /
    (Settings). Once a station has a visit from this app, the target is that
    visit's own bearing and its photo is laid faintly over the viewfinder
    (**Last visit** cycles faint / strong / off), so repeat photos line up.
-   A level (horizon line and tilt) helps match the framing. After a
-   directional shot the app moves to the next empty slot.
+   A level (horizon line and tilt) helps match the framing. After each
+   shot the app moves to the next empty slot, both photos facing one way
+   before turning — North, North groundcover, East, East groundcover, South,
+   South groundcover, West, West groundcover, then the post — so it is one
+   trip round the post, not two.
 3. **Done** opens the visit details — observer, monitoring event (both
    remembered), post condition, notes, and whether a post was installed on
    this visit (which updates the station). **Save & upload** queues it.
@@ -56,6 +59,19 @@ Cypress Creek 2020) into 48 stations; they read credentials from `ARC_USER` /
 **Get ready for offline** (menu) refreshes the stations and brings the last
 visit's photos for the nearest 25 stations onto the phone, for lining up
 shots with no signal.
+
+**Going back into a visit.** A finished visit — still waiting, or long since
+uploaded — can be reopened to add photos (another angle, something by the
+post) or to change its details: **Edit** on it in the station's sheet, which
+lists its latest visits, or **✎** in the upload queue. The camera says
+*· editing*. **Done → Save & upload changes** sends only what changed: the
+new photos go to the same visit, and its details go only if they were edited.
+**Discard changes** — or backing out having changed nothing — leaves the
+visit as it was. A visit that is on the layer but not on this phone (taken in
+Field Maps, on another phone, or cleared from this one) can be added to the
+same way; its photos already there count towards the slots. While a visit is
+open, nothing of it uploads until Done, and a station has one open visit at
+a time.
 
 New stations can be added where you stand (**+ New station here**); the ID is
 suggested from the nearest station's prefix. Stations can be edited — post
@@ -136,8 +152,8 @@ Bump `REV` in `sw.js` whenever the file list changes.
 
 ## Tests
 
-`tests/pp-upload.mjs` (node), `tests/pp-land.mjs` and `tests/pp-coexist.mjs`
-(browser, no service), and `tests/pp-flow.mjs` (browser, live service). The
-last writes only under the station called **Test**, or a station it adds, and
-removes only rows carrying its own GlobalIDs; the Test station's fields are
-put back as found. See `tests/README.md`.
+`tests/pp-upload.mjs` (node), `tests/pp-land.mjs`, `tests/pp-coexist.mjs` and
+`tests/pp-visit.mjs` (browser, no service), and `tests/pp-flow.mjs` (browser,
+live service). The last writes only under the station called **Test**, or a
+station it adds, and removes only rows carrying its own GlobalIDs; the Test
+station's fields are put back as found. See `tests/README.md`.

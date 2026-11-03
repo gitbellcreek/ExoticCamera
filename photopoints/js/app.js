@@ -85,6 +85,12 @@
     return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
   }
 
+  function fmtWhen(ms) {
+    if (!ms) return '';
+    var d = new Date(ms);
+    return fmtDate(ms) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
   function fmtDist(m) {
     if (m === null || m === undefined) return '';
     if (m < 1000) return Math.round(m) + ' m';
@@ -553,9 +559,9 @@
       var open = vs.filter(function (v) { return v.state === 'draft'; });
       open.forEach(function (v) { drafts[v.stationGid] = v; });
       $('drafts').innerHTML = open.map(function (v) {
-        return '<div class="draft-banner"><span><b>' + esc(v.stationId) + '</b> — visit in progress (' +
-          esc(fmtDate(v.createdAt)) + ')</span><div class="row"><button class="btn small" data-resume="' + v.id +
-          '">Resume</button></div></div>';
+        return '<div class="draft-banner"><span><b>' + esc(v.stationId) + '</b> — ' +
+          esc(v.reopened ? 'changes to the ' + fmtDate(visitDate(v)) + ' visit' : 'visit in progress (' + fmtDate(v.createdAt) + ')') +
+          '</span><div class="row"><button class="btn small" data-resume="' + v.id + '">Resume</button></div></div>';
       }).join('');
       Array.prototype.forEach.call($('drafts').querySelectorAll('[data-resume]'), function (b) {
         b.addEventListener('click', function () {
@@ -588,11 +594,56 @@
     $('sp-maps').classList.toggle('hidden', s.lat === null);
     renderStationGuide();
     renderGhostNote(s);
+    renderStationVisits(s);
     openSheet('station-panel');
-    // pick up the last visit's photos while there is signal, for lining up the new ones
+    // while there is signal: the station's visits on the layer, and the last
+    // one's photos for lining up the new ones
     if (state.online && state.auth && lv && !s.pending) {
-      Arc.fetchGhosts(gid).then(function () { renderGhostNote(s); }).catch(function () { /* offline: fine */ });
+      Arc.stationVisits(gid).then(function (list) {
+        if (state.sheetStation === s) renderStationVisits(s);
+        return Arc.fetchGhosts(gid, null, list);
+      }).then(function () { renderGhostNote(s); }).catch(function () { /* offline: fine */ });
     }
+  }
+
+  /* ── a station's visits, to go back into one ────────────────── */
+
+  var listedVisits = [];
+
+  /** The latest visits — on this phone or on the layer — each with an Edit button. */
+  function renderStationVisits(s) {
+    var box = $('sp-visits');
+    if (!box) return Promise.resolve();
+    return Promise.all([Store.visits(), Store.shots(), Store.get('stationVisits:' + s.gid)]).then(function (r) {
+      var mine = r[0].filter(function (v) { return v.stationGid === s.gid && v.state !== 'draft'; });
+      var photos = {}, here = {};
+      r[1].forEach(function (x) { photos[x.visitId] = (photos[x.visitId] || 0) + 1; });
+      var list = mine.map(function (v) {
+        here[normGid(v.globalId)] = true;
+        return { id: v.id, when: visitDate(v), who: v.attrs && v.attrs.Observer, n: (photos[v.id] || 0) + (v.serverPhotos || 0),
+                 status: v.state === 'sent' && !v.pendingEdit ? 'uploaded' : v.state === 'error' ? 'upload problem' : 'waiting to upload' };
+      });
+      ((r[2] && r[2].list) || []).forEach(function (sv) {
+        if (here[normGid(sv.gid)]) return;
+        list.push({ sv: sv, when: sv.attrs.VisitDate, who: sv.attrs.Observer, n: sv.atts.length, status: 'on the layer' });
+      });
+      list.sort(function (a, b) { return (b.when || 0) - (a.when || 0); });
+      listedVisits = list.slice(0, 4);
+      if (state.sheetStation !== s) return;
+      box.classList.toggle('hidden', !listedVisits.length);
+      box.innerHTML = '<h3>Visits</h3>' + listedVisits.map(function (x, i) {
+        return '<div class="vrow"><div class="vmeta"><b>' + esc(fmtWhen(x.when) || 'No date') + '</b><span>' +
+          esc([x.who, x.n + ' photo' + (x.n === 1 ? '' : 's'), x.status].filter(Boolean).join(' · ')) + '</span></div>' +
+          '<button class="btn small ghost" data-vedit="' + i + '" aria-label="Add photos to or change this visit">Edit</button></div>';
+      }).join('');
+      Array.prototype.forEach.call(box.querySelectorAll('[data-vedit]'), function (b) {
+        b.addEventListener('click', function () {
+          Sound.unlock();
+          var x = listedVisits[+b.dataset.vedit];
+          if (x) (x.sv ? adoptVisit(x.sv, s) : reopenVisit(x.id));
+        });
+      });
+    });
   }
 
   function renderStationGuide() {
@@ -642,13 +693,103 @@
     });
   }
 
+  function visitDate(v) { return (v.attrs && v.attrs.VisitDate) || v.createdAt; }
+  function normGid(gid) { return String(gid || '').replace(/[{}]/g, '').toUpperCase(); }
+
+  /** Details equal, counting an empty field and a missing one as the same. */
+  function sameAttrs(a, b) {
+    a = a || {}; b = b || {};
+    var blank = function (x) { return x === null || x === undefined || x === '' ? null : x; };
+    return Object.keys(Object.assign({}, a, b)).every(function (k) { return blank(a[k]) === blank(b[k]); });
+  }
+
+  /**
+   * Back into a visit that is finished — waiting, going up, or long since on
+   * the layer — to add photos or change its details. It is a draft again
+   * until Done, so nothing half-done goes up, and what it was is kept so
+   * Discard can put it back.
+   */
+  function reopenVisit(id, adopted) {
+    return Store.visits().then(function (vs) {
+      var v = vs.filter(function (x) { return x.id === id; })[0];
+      if (!v) return null;
+      if (v.state === 'draft') return enterCamera(v);
+      var busy = vs.filter(function (x) { return x.state === 'draft' && x.stationGid === v.stationGid; })[0];
+      if (busy) {
+        toast('A visit at ' + v.stationId + ' is already open — finish or discard it first', 'warn', 4000);
+        return adopted ? Store.removeVisit(v.id) : null;
+      }
+      return Store.patchVisit(id, {
+        state: 'draft',
+        reopened: { at: Date.now(), adopted: !!adopted, state: v.state, attrs: v.attrs, pendingEdit: !!v.pendingEdit,
+                    postNow: v.postNow || null, postType: v.postType || '', postTag: v.postTag || '' }
+      }).then(function (row) {
+        Report.note('visit reopened', v.stationId);
+        return enterCamera(row);
+      });
+    });
+  }
+
+  /** A visit on the layer but not on this phone: copy it onto the phone to add to it. */
+  function adoptVisit(sv, s) {
+    var counts = {};
+    sv.atts.forEach(function (a) {
+      var k = String(a.keywords || '').trim().toUpperCase();
+      if (Config.slot(k)) counts[k] = (counts[k] || 0) + 1;
+    });
+    var a = sv.attrs;
+    var v = {
+      id: Store.uuid(), globalId: sv.gid, objectId: sv.oid,
+      stationGid: s.gid, stationId: s.id, stationSite: s.site, stationLat: s.lat, stationLon: s.lon,
+      postWas: s.postInstalled || '',
+      createdAt: a.VisitDate || Date.now(), state: 'sent', sentAt: Date.now(),
+      attrs: { VisitDate: a.VisitDate, Observer: a.Observer, MonitoringEvent: a.MonitoringEvent,
+               PostCondition: a.PostCondition, Notes: a.Notes },
+      serverCounts: counts, serverPhotos: sv.atts.length
+    };
+    return Store.putVisit(v).then(function () { return reopenVisit(v.id, true); });
+  }
+
+  /** Photos taken since the visit was reopened. */
+  function addedShots(v) {
+    return v && v.reopened ? state.shots.filter(function (s) { return s.createdAt >= v.reopened.at; }) : state.shots;
+  }
+
+  /** New photos, changed details, or a post that would change the station. */
+  function changedSince(v) {
+    var r = v.reopened, st = findStation(v.stationGid);
+    var was = st ? st.postInstalled : v.postWas;
+    return addedShots(v).length > 0 || !sameAttrs(r.attrs, v.attrs) ||
+      !!(v.postNow && v.postNow !== was && v.postNow !== r.postNow);
+  }
+
+  /** Put a reopened visit back as it was: the photos added since go, the details are undone. */
+  function restoreVisit(v) {
+    var r = v.reopened;
+    return Promise.all(addedShots(v).map(function (s) { return Store.removeShot(s.id); })).then(function () {
+      if (r.adopted) return Store.removeVisit(v.id);          // only ever a copy of what is on the layer
+      return Store.patchVisit(v.id, {
+        state: r.state === 'sent' ? 'sent' : 'queued', reopened: null, attrs: r.attrs, pendingEdit: r.pendingEdit,
+        postNow: r.postNow, postType: r.postType, postTag: r.postTag
+      });
+    });
+  }
+
+  /** Save the visit being shot, keeping what the upload engine wrote to it meanwhile. */
+  function storeVisit(v) {
+    return Store.visit(v.id).then(function (cur) {
+      if (cur && cur.objectId && !v.objectId) v.objectId = cur.objectId;
+      return Store.putVisit(v);
+    });
+  }
+
   function enterCamera(v) {
     closeSheets();
     state.visit = v;
     return Store.shotsOf(v.id).then(function (shots) {
       state.shots = shots;
       setView('cam');
-      $('cam-station').textContent = v.stationId;
+      $('cam-station').textContent = v.stationId + (v.reopened ? ' · editing' : '');
       renderSlots();
       selectSlot(nextEmpty(null) || 'N');
       renderReviewThumb();
@@ -676,19 +817,28 @@
 
   function shotsIn(slot) { return state.shots.filter(function (s) { return s.slot === slot; }); }
 
-  /** The next slot with no photo yet, after `from`, eye level then groundcover then the post. */
+  /** Photos in a slot: the ones on the phone, and any the visit already had on the layer. */
+  function slotCount(key) {
+    var on = state.visit && state.visit.serverCounts;
+    return shotsIn(key).length + ((on && on[key]) || 0);
+  }
+
+  /**
+   * The next slot with no photo yet, after `from`: each direction at eye level
+   * and then its groundcover, so it is one trip round the post, then the post.
+   */
   function nextEmpty(from) {
-    var keys = Config.SLOTS.map(function (s) { return s.key; }).filter(function (k) { return k !== 'MISC'; });
+    var keys = Config.ORDER;
     var start = from ? keys.indexOf(from) + 1 : 0;
     for (var i = 0; i < keys.length; i++) {
       var k = keys[(start + i) % keys.length];
-      if (!shotsIn(k).length) return k;
+      if (!slotCount(k)) return k;
     }
     return null;
   }
 
   function slotButton(sl) {
-    var n = shotsIn(sl.key).length;
+    var n = slotCount(sl.key);
     return '<button class="slot' + (sl.group === 'low' ? ' low' : '') + (n ? ' has' : '') +
       (sl.key === state.slot ? ' on' : '') + '" data-slot="' + sl.key + '" role="tab" aria-selected="' +
       (sl.key === state.slot) + '" aria-label="' + esc(sl.label) + (n ? ', ' + n + ' photo' + (n === 1 ? '' : 's') : '') +
@@ -1077,6 +1227,10 @@
           esc(sl.label + ' photo') + '"></button>';
       }).join('') + '</div>');
     });
+    if (v.serverPhotos) {
+      html.unshift('<p class="hint">' + v.serverPhotos + ' earlier photo' + (v.serverPhotos === 1 ? ' is' : 's are') +
+        ' on the layer and not on this phone — only the ones added here are shown.</p>');
+    }
     $('rv-list').innerHTML = html.join('') || '<p class="hint">No photos yet.</p>';
     Array.prototype.forEach.call($('rv-list').querySelectorAll('[data-shot]'), function (b) {
       b.addEventListener('click', function () { openPhoto(b.dataset.shot); });
@@ -1128,8 +1282,10 @@
     if (!v) return;
     var st = findStation(v.stationGid);
     var a = v.attrs || {};
-    $('dp-title').textContent = v.stationId + (finishing ? ' — finish visit' : ' — visit details');
-    $('dp-when').textContent = 'Started ' + new Date(v.createdAt).toLocaleString() + (v.objectId ? ' · already on the layer' : '');
+    var r = v.reopened;
+    $('dp-title').textContent = v.stationId + (r ? ' — edit visit' : finishing ? ' — finish visit' : ' — visit details');
+    $('dp-when').textContent = (r ? 'Visit of ' + new Date(visitDate(v)).toLocaleString() : 'Started ' + new Date(v.createdAt).toLocaleString()) +
+      (v.objectId ? ' · already on the layer' : '');
     $('dp-observer').value = a.Observer || '';
     $('dp-event').value = a.MonitoringEvent || '';
     $('dp-notes').value = a.Notes || '';
@@ -1139,10 +1295,16 @@
     fillSelect($('dp-post-type'), options(state.meta.stations, 'PostType'), v.postType || (st && st.postType) || '', '—');
     $('dp-post-tag').value = v.postTag || (st && st.postTag) || '';
     var n = state.shots.length;
-    var missing = Config.SLOTS.filter(function (sl) { return sl.group !== 'other' && !shotsIn(sl.key).length; })
+    var missing = Config.ORDER.map(Config.slot).filter(function (sl) { return sl.group !== 'other' && !slotCount(sl.key); })
       .map(function (sl) { return (sl.group === 'low' ? 'ground ' : '') + sl.short; });
-    $('dp-summary').textContent = n + ' photo' + (n === 1 ? '' : 's') + (missing.length ? ' · no photo yet for ' + missing.join(', ') : ' · every direction covered');
+    if (r) {
+      var added = addedShots(v).length, had = n - added + (v.serverPhotos || 0);
+      $('dp-summary').textContent = added + ' new photo' + (added === 1 ? '' : 's') + ' · ' + had + ' already in this visit';
+    } else {
+      $('dp-summary').textContent = n + ' photo' + (n === 1 ? '' : 's') + (missing.length ? ' · no photo yet for ' + missing.join(', ') : ' · every direction covered');
+    }
     $('dp-finish').textContent = v.objectId ? 'Save & upload changes' : 'Save & upload';
+    $('dp-discard').textContent = r ? 'Discard changes' : 'Discard this visit';
     openSheet('details-panel');
   }
 
@@ -1165,19 +1327,38 @@
     v.postNow = postChoice;
     v.postType = $('dp-post-type').value || '';
     v.postTag = $('dp-post-tag').value.trim();
+    if (v.reopened) return Promise.resolve();    // an older visit's names are not today's defaults
     return Config.save({ observer: v.attrs.Observer, monitoringEvent: v.attrs.MonitoringEvent });
   }
 
   function saveDetails() {
-    return readDetails().then(function () { return Store.putVisit(state.visit); });
+    return readDetails().then(function () { return storeVisit(state.visit); });
   }
 
-  /** Done: the visit joins the upload queue, and the station is updated if its post changed. */
+  /**
+   * Done: the visit joins the upload queue, and the station is updated if its
+   * post changed. A reopened visit sends only what changed: its new photos,
+   * and its details if they were edited.
+   */
   function finishVisit() {
     var v = state.visit;
     if (!v) return Promise.resolve();
-    if (!state.shots.length && !confirm('Save this visit with no photos?')) return Promise.resolve();
+    var r = v.reopened;
+    if (!state.shots.length && !r && !confirm('Save this visit with no photos?')) return Promise.resolve();
+    var added = addedShots(v).length;
     return readDetails().then(function () {
+      if (r && !changedSince(v)) {
+        return restoreVisit(v).then(function () {
+          toast('No changes — ' + v.stationId + ' is as it was', 'ok', 2500);
+          return leaveCamera();
+        }).then(refreshCounts);
+      }
+      return finishChanges(v, r, added);
+    });
+  }
+
+  function finishChanges(v, r, added) {
+    return Promise.resolve().then(function () {
       var st = findStation(v.stationGid);
       var was = st ? st.postInstalled : v.postWas;
       var jobs = [];
@@ -1190,16 +1371,21 @@
         }
         jobs.push(queueStationEdit(v.stationGid, attrs));
       }
-      if (v.objectId) v.pendingEdit = true;          // already on the layer: send the changes
+      // already on the layer: send the details again only if they changed
+      if (v.objectId && (!r || !sameAttrs(r.attrs, v.attrs))) v.pendingEdit = true;
       v.state = 'queued';
       v.finishedAt = Date.now();
-      jobs.push(Store.putVisit(v));
+      v.reopened = null;
+      jobs.push(storeVisit(v));
       return Promise.all(jobs);
     }).then(function () {
-      Report.note('visit finished', { station: v.stationId, photos: state.shots.length });
+      Report.note(r ? 'visit edited' : 'visit finished', { station: v.stationId, photos: state.shots.length, added: added });
       Sound.allClear();
-      toast(v.stationId + ' saved — ' + state.shots.length + ' photo' + (state.shots.length === 1 ? '' : 's') +
-        (state.online ? ' uploading' : ' will upload when back online'), 'ok', 3500);
+      var n = r ? added : state.shots.length;
+      var what = r ? ' updated — ' + (added ? added + ' new photo' + (added === 1 ? '' : 's') : 'the changes')
+                   : ' saved — ' + n + ' photo' + (n === 1 ? '' : 's');
+      var how = !state.online ? ' will upload when back online' : r && !added ? ' are uploading' : ' uploading';
+      toast(v.stationId + what + how, 'ok', 3500);
       return leaveCamera();
     }).then(refreshCounts).then(function () {
       if (state.online && Config.get().autoSync) sync(true);
@@ -1209,6 +1395,17 @@
   function discardVisit() {
     var v = state.visit;
     if (!v) return Promise.resolve();
+    if (v.reopened) {
+      var added = addedShots(v).length;
+      if (!confirm('Discard ' + (added ? 'the ' + added + ' new photo' + (added === 1 ? '' : 's') + ' and ' : '') +
+        'any changes? The visit stays as it was.')) return Promise.resolve();
+      return restoreVisit(v).then(function () {
+        Report.note('visit changes discarded', v.stationId);
+        closeSheets();
+        toast('Changes discarded', 'ok');
+        return leaveCamera();
+      }).then(refreshCounts);
+    }
     if (v.objectId) { toast('Part of this visit is already uploaded — remove it in the upload queue', 'warn', 4000); return Promise.resolve(); }
     if (!confirm('Discard this visit and its ' + state.shots.length + ' photo(s)? This cannot be undone.')) return Promise.resolve();
     return Store.removeVisit(v.id).then(function () {
@@ -1498,7 +1695,7 @@
         html.push('<div class="qrow ' + cls + '" data-visit="' + v.id + '"><div class="qhead"><div class="qmeta"><b>' + esc(v.stationId) + '</b>' +
           '<span>' + esc(new Date(v.createdAt).toLocaleString()) + '</span><span>' + esc(sub) + '</span></div>' +
           (shots.some(function (s) { return s.hasPhoto; }) ? '<button class="qbtn" data-save="' + v.id + '" aria-label="Save photos to the phone">⤓</button>' : '') +
-          (v.state !== 'sent' ? '<button class="qbtn" data-reopen="' + v.id + '" aria-label="Add photos or change details">✎</button>' : '') +
+          '<button class="qbtn" data-reopen="' + v.id + '" aria-label="Add photos or change details">✎</button>' +
           '<button class="qbtn del" data-del="' + v.id + '" aria-label="Remove from this phone">✕</button></div>' +
           '<div class="qstrip">' + shots.map(function (s) {
             return '<div class="qph ' + s.state + '" style="background-image:url(' + (s.thumb || '') + ')"><b>' + esc((Config.slot(s.slot) || {}).short || s.slot) + '</b></div>';
@@ -1513,13 +1710,7 @@
         b.addEventListener('click', function () { saveVisitPhotos(b.dataset.save); });
       });
       Array.prototype.forEach.call($('queue-list').querySelectorAll('[data-reopen]'), function (b) {
-        b.addEventListener('click', function () {
-          Store.visit(b.dataset.reopen).then(function (v) {
-            if (!v) return;
-            v.state = 'draft';
-            return Store.putVisit(v).then(function () { return enterCamera(v); });
-          });
-        });
+        b.addEventListener('click', function () { Sound.unlock(); reopenVisit(b.dataset.reopen); });
       });
       Array.prototype.forEach.call($('queue-list').querySelectorAll('[data-del]'), function (b) {
         b.addEventListener('click', function () { removeVisit(b.dataset.del); });
@@ -1839,11 +2030,15 @@
     $('start-cam').addEventListener('click', function () { Sound.unlock(); startCompass(); startCamera(); });
     $('cam-close').addEventListener('click', function () {
       Sound.tick();
-      if (state.visit && state.shots.length) toast('Visit kept — resume it from the station list', 'ok', 2500);
-      else if (state.visit && !state.shots.length && state.visit.state === 'draft' && !state.visit.objectId) {
-        Store.removeVisit(state.visit.id);       // nothing in it: no point keeping it
+      var v = state.visit, done = null;
+      if (v && v.reopened) {
+        if (changedSince(v)) toast('Changes kept — finish them from the station list', 'ok', 2500);
+        else done = restoreVisit(v);             // looked, changed nothing: back as it was
+      } else if (v && state.shots.length) toast('Visit kept — resume it from the station list', 'ok', 2500);
+      else if (v && v.state === 'draft' && !v.objectId) {
+        done = Store.removeVisit(v.id);          // nothing in it: no point keeping it
       }
-      leaveCamera();
+      Promise.resolve(done).then(leaveCamera).then(refreshCounts);
     });
     $('review').addEventListener('click', function () { if (state.shots.length) openReview(); });
     $('finish').addEventListener('click', function () { Sound.tick(); openDetails(true); });
@@ -1879,8 +2074,11 @@
     // queue
     $('q-sync').addEventListener('click', function () { closeSheets(); Arc.clearBackoff().then(function () { return sync(true); }); });
     $('q-clear-done').addEventListener('click', function () {
-      Store.visits().then(function (vs) {
-        return Promise.all(vs.filter(function (v) { return v.state === 'sent'; }).map(function (v) { return Store.removeVisit(v.id); }));
+      Promise.all([Store.visits(), Store.shots()]).then(function (r) {
+        var owed = {};
+        r[1].forEach(function (s) { if (s.state !== 'sent') owed[s.visitId] = true; });
+        var done = r[0].filter(function (v) { return v.state === 'sent' && !v.pendingEdit && !owed[v.id]; });
+        return Promise.all(done.map(function (v) { return Store.removeVisit(v.id); }));
       }).then(refreshCounts).then(renderQueue);
     });
 

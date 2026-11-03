@@ -26,6 +26,10 @@
     { key: 'MISC', label: 'Misc', short: '+', bearing: null, group: 'other' }
   ];
 
+  /* The order the camera moves through after each shot: both photos facing
+     one way before turning, so it is one trip around the post, not two. */
+  var ORDER = ['N', 'LOW_N', 'E', 'LOW_E', 'S', 'LOW_S', 'W', 'LOW_W', 'LOCATOR'];
+
   var DEFAULTS = {
     serviceUrl: SERVICE,
     stationsLayer: 0,
@@ -77,6 +81,7 @@
   var Config = {
     BUILD: BUILD,
     SLOTS: SLOTS,
+    ORDER: ORDER,
     DEFAULTS: DEFAULTS,
     RESERVED: RESERVED,
 

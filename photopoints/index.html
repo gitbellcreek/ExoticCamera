@@ -119,6 +119,7 @@
     </div>
     <dl class="facts" id="sp-facts"></dl>
     <p class="hint" id="sp-ghost"></p>
+    <div class="sp-visits hidden" id="sp-visits"></div>
     <div class="row">
       <button class="btn" id="sp-start">Start visit</button>
       <button class="btn ghost" id="sp-edit">Edit station</button>
@@ -275,7 +276,7 @@
       name — has this added.</p>
     <label class="fld"><span>On target within ± degrees</span>
       <input type="number" id="s-tol" min="1" max="30" step="1"></label>
-    <label class="fld chk"><input type="checkbox" id="s-advance"><span>After a shot, move to the next empty slot</span></label>
+    <label class="fld chk"><input type="checkbox" id="s-advance"><span>After a shot, move to the next empty slot: N, ground N, E, ground E, …</span></label>
     <label class="fld chk"><input type="checkbox" id="s-ghost"><span>Show the last visit's photo over the camera</span></label>
 
     <label class="fld"><span>Photo size</span>

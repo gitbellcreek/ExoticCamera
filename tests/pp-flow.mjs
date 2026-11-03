@@ -147,7 +147,7 @@ try {
   const on = await page.locator('#aim-text').textContent();
   if (!/On target/.test(on)) fail('expected on target, got ' + on); else ok(on);
 
-  step('shooting: N, then E (auto-advanced), a second N, and the post');
+  step('shooting: N, on to its groundcover by itself, then E, a second N, and the post');
   const shoot = async () => {
     await page.click('#shutter');
     await page.waitForFunction(() => !document.getElementById('shutter').disabled && document.getElementById('saving').classList.contains('hidden'), null, { timeout: 15000 });
@@ -155,7 +155,8 @@ try {
   };
   await shoot();
   const slotNow = await page.evaluate(() => PhotoPoints.state.slot);
-  if (slotNow !== 'E') fail('did not move on to East, at ' + slotNow); else ok('moved on to East by itself');
+  if (slotNow !== 'LOW_N') fail('did not move on to North groundcover, at ' + slotNow); else ok('moved on to North groundcover by itself');
+  await page.click('.slot[data-slot="E"]');
   await page.evaluate(() => { window.__mag = 96.3; });            // true east
   await page.waitForTimeout(400);
   await shoot();

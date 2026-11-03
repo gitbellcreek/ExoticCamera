@@ -21,7 +21,7 @@ const norm = (g) => String(g || '').replace(/[{}]/g, '').toLowerCase();
 function makeService() {
   const S = {
     stations: [], visits: [], attachments: [], uploads: new Map(),
-    lose: [], drop: [], calls: [],
+    lose: [], drop: [], calls: [], applied: [],
   };
   let oid = 1, aid = 1, up = 1;
   const meta = (fields) => ({ objectIdField: 'OBJECTID', globalIdField: 'GlobalID', fields });
@@ -77,6 +77,7 @@ function makeService() {
       : Object.fromEntries(new URLSearchParams(body ? String(body) : ''));
     const op = u.replace(SVC, '');
     S.calls.push(op);
+    if (/applyEdits$/.test(op)) S.applied.push({ op, p });
     const trip = (list) => { const i = list.findIndex(re => re.test(op)); if (i >= 0) { list.splice(i, 1); return true; } return false; };
     if (trip(S.drop)) throw new TypeError('Load failed');              // never reached the server
     let reply;
@@ -354,6 +355,125 @@ console.log('\n== a draft is never uploaded');
   await flush(app);
   if (service.visits.length || service.attachments.length) fail('a visit still being shot was uploaded');
   else ok('visits still being shot stay on the phone');
+}
+
+/* ── going back into a visit ───────────────────────────────────────── */
+
+async function addPhoto(app, blobs, visitId, slot, seed) {
+  const id = app.Store.uuid();
+  const bytes = photoBytes(300 * 1024 + seed, seed);
+  blobs[id] = bytes;
+  await app.Store.addShot({ id, visitId, slot, createdAt: Date.now() + seed, name: 'Test_' + slot + '_' + seed + '.jpg',
+    attGlobalId: app.Store.guid(), state: 'pending', size: bytes.length }, new Blob([bytes], { type: 'image/jpeg' }));
+  return id;
+}
+const updatesSent = (service, since) => service.applied.slice(since).filter(a => a.op === '/1/applyEdits' && a.p.updates).length;
+
+console.log('\n== a photo added to a visit that is already up');
+{
+  const { service, app, blobs, visit } = await setup({ shots: 2 });
+  await settle(app);
+  const since = service.applied.length;
+  await addPhoto(app, blobs, visit.id, 'MISC', 9);
+  await app.Store.patchVisit(visit.id, { state: 'queued', finishedAt: Date.now() });    // what Done does
+  await settle(app);
+  if (service.visits.length !== 1) fail(service.visits.length + ' visits'); else ok('still one visit on the layer');
+  if (updatesSent(service, since)) fail('sent the unchanged details again'); else ok('the unchanged details are not sent again');
+  const a = service.attachments.find(x => x.name === 'Test_MISC_9.jpg');
+  if (!a || a.parent !== service.visits[0].oid || a.keywords !== 'MISC') fail('new photo not on the visit: ' + JSON.stringify(a && { parent: a.parent, kw: a.keywords }));
+  else ok('the new photo is attached to the same visit, keyworded MISC');
+  if (service.attachments.length !== 3 || !await intact(service, blobs, app)) fail('photos changed or sent twice'); else ok('three photos, each once, intact');
+  if ((await app.Store.visit(visit.id)).state !== 'sent') fail('visit not marked sent again'); else ok('and the visit is marked sent again');
+}
+
+console.log('\n== details changed on a visit that is already up');
+{
+  const { service, app, visit } = await setup({ shots: 1 });
+  await settle(app);
+  const v0 = await app.Store.visit(visit.id);
+  await app.Store.patchVisit(visit.id, { attrs: { ...v0.attrs, Notes: 'changed later' }, pendingEdit: true, state: 'queued', finishedAt: Date.now() });
+  const since = service.applied.length;
+  await settle(app);
+  if (service.visits.length !== 1 || service.visits[0].attrs.Notes !== 'changed later') fail('layer: ' + JSON.stringify(service.visits.map(v => v.attrs.Notes)));
+  else ok('the change lands on the same visit');
+  if (updatesSent(service, since) !== 1) fail(updatesSent(service, since) + ' updates sent'); else ok('as one update');
+  if (service.attachments.length !== 1) fail('photos sent again'); else ok('the photos are not sent again');
+}
+
+console.log('\n== a visit that is only on the layer, added to on this phone');
+{
+  const { service, app, blobs, visit, stationGid } = await setup({ shots: 0 });
+  await app.Store.patchVisit(visit.id, { state: 'draft' });                             // setup's own visit stays out of it
+  const gid = app.Store.guid();
+  service.visits.push({ oid: 777, gid, attrs: { GlobalID: gid, StationGUID: stationGid, Notes: 'from Field Maps' } });
+  const local = { id: app.Store.uuid(), globalId: gid, objectId: 777, stationGid, stationId: 'Test', createdAt: Date.now(),
+    state: 'queued', finishedAt: Date.now(), attrs: { VisitDate: Date.now(), Notes: 'from Field Maps' }, serverCounts: { N: 1 }, serverPhotos: 1 };
+  await app.Store.putVisit(local);
+  await addPhoto(app, blobs, local.id, 'LOW_N', 5);
+  const since = service.applied.length;
+  await flush(app);
+  await flush(app);
+  if (service.visits.length !== 1 || service.applied.slice(since).some(a => a.p.adds)) fail('the visit was added again');
+  else ok('the visit is not added again');
+  const a = service.attachments[0];
+  if (!a || a.parent !== 777 || a.keywords !== 'LOW_N' || !await intact(service, blobs, app)) fail('photo: ' + JSON.stringify(a && { parent: a.parent, kw: a.keywords }));
+  else ok('the photo is attached to the visit on the layer, intact, keyworded LOW_N');
+  if ((await app.Store.visit(local.id)).state !== 'sent') fail('not marked sent'); else ok('and the phone\'s copy is marked sent');
+}
+
+console.log('\n== a visit marked sent that still owes a photo');
+{
+  const { service, app, blobs, visit } = await setup({ shots: 1 });
+  await settle(app);
+  await addPhoto(app, blobs, visit.id, 'E', 7);                                        // the visit itself still says sent
+  await flush(app);
+  if (service.attachments.length !== 2 || !await intact(service, blobs, app)) fail('the owed photo was left on the phone');
+  else ok('the owed photo still goes up');
+}
+
+console.log('\n== reopened on the phone while it was going up');
+{
+  const { service, app, visit } = await setup({ shots: 2 });
+  const realFetch = service.fetch;
+  let reopened = false;
+  service.fetch = async (url, init) => {
+    if (!reopened && String(url).endsWith('/uploadPart')) { reopened = true; await app.Store.patchVisit(visit.id, { state: 'draft' }); }
+    return realFetch(url, init);
+  };
+  app.fetch = service.fetch;
+  await flush(app);
+  const v = await app.Store.visit(visit.id);
+  if (v.state !== 'draft') fail('the upload took the visit out of editing: ' + v.state); else ok('it stays open for editing');
+  if (!v.objectId) fail('lost its id on the layer'); else ok('and keeps its id on the layer');
+  await app.Store.patchVisit(visit.id, { state: 'queued', finishedAt: Date.now() });
+  await settle(app);
+  if ((await app.Store.visit(visit.id)).state !== 'sent' || service.attachments.length !== 2 || service.visits.length !== 1) fail('did not finish after Done');
+  else ok('Done again, and it finishes: one visit, two photos');
+}
+
+console.log('\n== finished again while its last change was going up');
+{
+  const { service, app, visit } = await setup({ shots: 1 });
+  await settle(app);
+  const v0 = await app.Store.visit(visit.id);
+  await app.Store.patchVisit(visit.id, { attrs: { ...v0.attrs, Notes: 'first edit' }, pendingEdit: true, state: 'queued', finishedAt: 1 });
+  const realFetch = service.fetch;
+  let hit = false;
+  service.fetch = async (url, init) => {
+    const res = await realFetch(url, init);
+    if (!hit && String(url).endsWith('/1/applyEdits') && String(init.body).includes('updates')) {
+      hit = true;                                      // the second Done, while the first change is in flight
+      const cur = await app.Store.visit(visit.id);
+      await app.Store.patchVisit(visit.id, { attrs: { ...cur.attrs, Notes: 'second edit' }, pendingEdit: true, state: 'queued', finishedAt: 2 });
+    }
+    return res;
+  };
+  app.fetch = service.fetch;
+  await flush(app);
+  if (!(await app.Store.visit(visit.id)).pendingEdit) fail('the second change was marked as sent'); else ok('the second change is still owed');
+  await settle(app);
+  if (service.visits[0].attrs.Notes !== 'second edit') fail('notes on the layer: ' + service.visits[0].attrs.Notes);
+  else ok('and goes up next: the layer has the latest notes');
 }
 
 console.log(process.exitCode ? '\nFAILED' : '\nupload engine holds up');
