@@ -82,6 +82,11 @@ const browser = await chromium.launch({ executablePath: CHROME });
 const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, serviceWorkers: 'block',
   timezoneId: 'America/New_York' });
 await fakeArcGIS(ctx);
+// anything the page's Content-Security-Policy blocks is recorded
+await ctx.addInitScript(() => {
+  window.__csp = [];
+  document.addEventListener('securitypolicyviolation', (e) => window.__csp.push(e.violatedDirective + ' ' + e.blockedURI));
+});
 const page = await ctx.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
@@ -90,7 +95,7 @@ const shown = (pane = 'a') => page.evaluate((p) => {
   const el = document.querySelector('#pane-' + p);
   const img = el.querySelector('img');
   if (img.classList.contains('hidden')) return { empty: el.querySelector('.empty').textContent.trim() };
-  const m = /attachments\/(\d+)/.exec(img.getAttribute('src') || '');
+  const m = /\/(\d+)$/.exec(img.dataset.att || '');
   return { id: m ? +m[1] : null, caption: el.querySelector('figcaption').textContent };
 }, pane);
 async function expectPhoto(what, oid, kw, nth = 0, pane = 'a') {
@@ -180,6 +185,18 @@ try {
   await expectPhoto('G back to eye level', 12, 'N');
   await snap('one');
 
+  step('the token stays out of the page');
+  await page.waitForFunction(() => /^blob:/.test(document.querySelector('#pane-a img').getAttribute('src') || ''), null, { timeout: 10000 });
+  ok('the photo is shown from memory: ' + (await page.getAttribute('#pane-a img', 'src')).slice(0, 22) + '…');
+  const leaks = await page.evaluate(() => ['made-up'].filter((t) => document.documentElement.outerHTML.includes(t) ||
+    [...document.querySelectorAll('[href],[src]')].some((el) => (el.getAttribute('href') || el.getAttribute('src') || '').includes('token='))));
+  if (leaks.length) fail('the token is in the page'); else ok('no token in the page: not in an image address, not in a link');
+  await page.click('[data-full="photo"]');
+  await page.waitForFunction(() => /^blob:/.test((document.querySelector('#b-full-body img') || {}).src || ''), null, { timeout: 10000 });
+  ok('full size opens in the page, from memory');
+  await page.keyboard.press('Escape');
+  if (await page.locator('#b-full').isVisible()) fail('Escape did not close full size'); else ok('Escape closes it');
+
   step('side by side');
   await key('ArrowUp');
   await key('2');
@@ -247,6 +264,8 @@ try {
   const wait = await em.evaluate(() => ({ msg: document.getElementById('b-msg').textContent, viewer: !document.getElementById('b-viewer').classList.contains('hidden') }));
   if (wait.msg !== 'Loading the station…' || wait.viewer) fail('placeholder: ' + JSON.stringify(wait)); else ok('the placeholder load just says "Loading the station…"');
   // and inside a frame sandboxed exactly as the experience's Embed widget does it
+  // a parent on another site, as experience.arcgis.com is: localhost and 127.0.0.1 are different sites
+  await em.goto(URLBASE.replace('127.0.0.1', 'localhost') + 'tests/README.md');
   await em.setContent('<iframe sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation allow-popups-to-escape-sandbox" ' +
     'style="border:0;width:100vw;height:100vh" src="' + APP + '?embed=1&station=' + encodeURIComponent(GID.toLowerCase()) + '"></iframe>');
   const fr = em.frameLocator('iframe');
@@ -286,6 +305,19 @@ try {
     await snap(w + 'x' + h);
   }
 
+  step('a file, then signing out');
+  await page.locator('.chip', { hasText: '2025-03-20' }).click();
+  await page.locator('[data-full="0"]').click();
+  await page.waitForFunction(() => /^blob:/.test((document.querySelector('#b-full-body iframe') || {}).src || ''), null, { timeout: 10000 });
+  ok('the PDF opens in the page, from memory');
+  await page.click('#b-full-close');
+  await page.locator('#b-viewer .signout').click();
+  await page.locator('#b-signin').waitFor({ timeout: 5000 });
+  const after = await page.evaluate(() => self.Store.get('auth').then((a) => ({ auth: !!a, src: document.querySelector('#pane-a img').getAttribute('src') })));
+  if (after.auth || after.src) fail('after signing out: ' + JSON.stringify(after)); else ok('signed out: the token is gone, and the photos with it');
+
+  const csp = await page.evaluate(() => window.__csp);
+  if (csp.length) fail('blocked by the security policy: ' + csp.join(' | ')); else ok('the security policy blocked nothing the page needs');
   if (writes.length) fail('tried to write: ' + writes.join(', ')); else ok('nothing was written');
   if (errs.length) fail('page errors: ' + errs.join(' | ')); else ok('no page errors');
 } catch (e) {

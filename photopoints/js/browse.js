@@ -132,11 +132,66 @@
     });
   }
 
-  function photoUrl(v, att, full) {
+  /* Photos are fetched with the token and shown from memory (blob: addresses),
+     so the token is never in the page: not in an image address someone copies,
+     not in a link, not in the browser's history. */
+  function attUrl(v, att, full) {
     var w = Math.max(screen.width || 0, screen.height || 0) * (window.devicePixelRatio || 1);
     var size = w > 2200 ? 2048 : w > 1400 ? 1600 : 1280;
     return Config.visitsUrl() + '/' + v.oid + '/attachments/' + att.id + '?' +
       (full ? '' : 'w=' + size + '&') + 'token=' + encodeURIComponent(state.token);
+  }
+
+  function fetchBlob(url) {
+    return fetch(url).then(function (r) {
+      if (r.status === 498 || r.status === 499) throw Arc.NeedAuth('Sign in again');
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      if (/json/i.test(r.headers.get('content-type') || '')) {      // ArcGIS answers a bad token with JSON
+        return r.json().then(function (j) {
+          var e = (j && j.error) || {};
+          if (e.code === 498 || e.code === 499) throw Arc.NeedAuth('Sign in again');
+          throw new Error(e.message || 'Not a photo');
+        });
+      }
+      return r.blob();
+    });
+  }
+
+  var blobs = {}, blobCount = 0;            // 'oid/id' → { p: Promise<object URL>, url, at }
+  function getPhoto(v, att) {
+    var key = v.oid + '/' + att.id, hit = blobs[key];
+    if (hit) { hit.at = Date.now(); return hit.p; }
+    var rec = { at: Date.now(), url: null };
+    rec.p = fetchBlob(attUrl(v, att)).then(function (b) { rec.url = URL.createObjectURL(b); return rec.url; });
+    rec.p.catch(function () { if (blobs[key] === rec) { delete blobs[key]; blobCount--; } });
+    blobs[key] = rec;
+    blobCount++;
+    trimPhotos();
+    return rec.p;
+  }
+
+  /** Keep the 40 most recently used photos in memory, never the ones on screen. */
+  function trimPhotos() {
+    if (blobCount <= 40) return;
+    var onScreen = {};
+    ['pane-a', 'pane-b'].forEach(function (id) { onScreen[$(id).querySelector('img').getAttribute('src')] = true; });
+    Object.keys(blobs).sort(function (a, b) { return blobs[a].at - blobs[b].at; }).some(function (k) {
+      if (blobCount <= 40) return true;
+      var r = blobs[k];
+      if (!r.url || onScreen[r.url]) return false;
+      URL.revokeObjectURL(r.url);
+      delete blobs[k];
+      blobCount--;
+      return false;
+    });
+  }
+
+  function forgetPhotos() {
+    Object.keys(blobs).forEach(function (k) { if (blobs[k].url) URL.revokeObjectURL(blobs[k].url); });
+    blobs = {};
+    blobCount = 0;
+    shown = {};
+    ['pane-a', 'pane-b'].forEach(function (id) { $(id).querySelector('img').removeAttribute('src'); });
   }
 
   function photosAt(i, slot) {
@@ -228,7 +283,7 @@
     });
   }
 
-  var shown = {};                       // pane id → src it was last asked to show
+  var shown = {};                       // pane id → the photo ('oid/id') it was last asked to show
 
   function renderPane(el, i, side) {
     var slot = slotKey(), v = state.visits[i], p = v ? pickAt(i, slot) : null;
@@ -252,19 +307,22 @@
         (others ? '<small>' + v.count + ' other photo' + (v.count === 1 ? '' : 's') + ' on this visit</small>' : '<small>No photos on this visit</small>');
       empty.classList.remove('hidden');
     } else {
-      var src = photoUrl(v, p.att);
-      if (shown[el.id] !== src) {
-        shown[el.id] = src;
+      var key = v.oid + '/' + p.att.id;
+      if (shown[el.id] !== key) {
+        shown[el.id] = key;
+        img.dataset.att = key;
         el.classList.add('loading');
-        img.onload = function () { if (shown[el.id] === src) el.classList.remove('loading'); };
-        img.onerror = function () {
-          if (shown[el.id] !== src) return;
+        var broken = function (e) {
+          if (shown[el.id] !== key) return;
           el.classList.remove('loading');
+          if (e && Arc.asError(e).needAuth) return failed(e);
           img.classList.add('hidden');
           empty.innerHTML = 'This photo could not be loaded<small>' + esc(p.att.name) + '</small>';
           empty.classList.remove('hidden');
         };
-        img.src = src;
+        img.onload = function () { if (shown[el.id] === key) el.classList.remove('loading'); };
+        img.onerror = function () { broken(null); };
+        getPhoto(v, p.att).then(function (url) { if (shown[el.id] === key) img.src = url; }, broken);
       }
       img.alt = slotName(slot) + ' photo, ' + label(v);
       img.classList.remove('hidden');
@@ -352,21 +410,67 @@
     }).join('');
     if (p) {
       html += '<dt>This photo</dt><dd>' + esc(p.att.name) + (p.att.size ? ' · ' + esc(fmtBytes(p.att.size)) : '') +
-        ' · <a href="' + esc(photoUrl(v, p.att, true)) + '" target="_blank" rel="noopener">full size ↗</a></dd>';
+        ' · <button class="linkish" data-full="photo">full size</button></dd>';
     }
     if (v.files.length) {
-      html += '<dt>Files</dt><dd>' + v.files.map(function (f) {
-        return '<a href="' + esc(photoUrl(v, f, true)) + '" target="_blank" rel="noopener">' + esc(f.name || 'file') + '</a>';
+      html += '<dt>Files</dt><dd>' + v.files.map(function (f, n) {
+        return '<button class="linkish" data-full="' + n + '">' + esc(f.name || 'file') + '</button>';
       }).join(', ') + '</dd>';
     }
     $('b-details').innerHTML = html;
   }
 
+  /* ── full size, in the page ─────────────────────────────────── */
+
+  var fullUrl = null;
+  function openFull(v, att) {
+    var body = $('b-full-body');
+    $('b-full-name').textContent = att.name || 'file';
+    body.innerHTML = '<p class="hint">Loading the full-size file…</p>';
+    $('b-full').classList.remove('hidden');
+    return fetchBlob(attUrl(v, att, true)).then(function (b) {
+      if ($('b-full').classList.contains('hidden')) return;
+      fullUrl = URL.createObjectURL(b);
+      body.innerHTML = '';
+      var type = att.type || b.type || '';
+      if (/^image\//i.test(type) || /\.(jpe?g|png|webp)$/i.test(att.name)) {
+        var im = document.createElement('img');
+        im.className = 'fit';
+        im.alt = att.name;
+        im.title = 'Tap to see it at actual size';
+        im.addEventListener('click', function () { im.classList.toggle('fit'); });
+        im.src = fullUrl;
+        body.appendChild(im);
+      } else if (/pdf/i.test(type) || /\.pdf$/i.test(att.name)) {
+        var fr = document.createElement('iframe');
+        fr.title = att.name;
+        fr.src = fullUrl;
+        body.appendChild(fr);
+      } else {
+        var a = document.createElement('a');
+        a.className = 'btn';
+        a.href = fullUrl;
+        a.download = att.name || 'file';
+        a.textContent = 'Save ' + (att.name || 'the file');
+        body.appendChild(a);
+      }
+    }).catch(function (e) {
+      e = Arc.asError(e);
+      if (e.needAuth) { closeFull(); failed(e); return; }
+      body.innerHTML = '<p class="hint">Could not load it: ' + esc(e.message) + '</p>';
+    });
+  }
+
+  function closeFull() {
+    $('b-full').classList.add('hidden');
+    $('b-full-body').innerHTML = '';
+    if (fullUrl) { URL.revokeObjectURL(fullUrl); fullUrl = null; }
+  }
+
   /* Neighbouring photos load ahead, so flipping and turning do not wait. */
-  var warm = [];
   function preload() {
     var slot = slotKey(), want = [];
-    var at = function (i, s) { var p = state.visits[i] && pickAt(i, s); if (p) want.push(photoUrl(state.visits[i], p.att)); };
+    var at = function (i, s) { var p = state.visits[i] && pickAt(i, s); if (p) want.push([state.visits[i], p.att]); };
     at(state.i - 1, slot); at(state.i + 1, slot);
     var k = DIRS.indexOf(state.dir);
     if (k >= 0) {
@@ -374,14 +478,7 @@
       at(state.i, pre + DIRS[(k + 1) % 4]); at(state.i, pre + DIRS[(k + 3) % 4]);
       at(state.i, (pre ? '' : 'LOW_') + state.dir);
     }
-    want.forEach(function (src) {
-      if (warm.some(function (im) { return im.src === src; })) return;
-      var im = new Image();
-      im.decoding = 'async';
-      im.src = src;
-      warm.push(im);
-      if (warm.length > 30) warm.shift();
-    });
+    want.forEach(function (w) { getPhoto(w[0], w[1]).catch(function () { /* shown as it comes up */ }); });
   }
 
   /* ───────────────────────── where we are (in the URL) ───────────────────────── */
@@ -471,6 +568,19 @@
     return Arc.token().then(function (t) { state.token = t; return route(); }, failed);
   }
 
+  /** Off this device: the token goes, and so does every photo held in memory. */
+  function signOut() {
+    closeFull();
+    return Arc.signOut().then(function () {
+      state.token = null;
+      state.station = null;
+      state.visits = [];
+      forgetPhotos();
+      message('Signed out.');
+      show('b-signin');
+    });
+  }
+
   /* ───────────────────────────── wiring ───────────────────────────── */
 
   function route() {
@@ -512,6 +622,17 @@
       openList();
     });
     $('b-search').addEventListener('input', renderList);
+    $('b-details').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-full]'), v = state.visits[state.i];
+      if (!b || !v) return;
+      var p = pickAt(state.i, slotKey());
+      var att = b.dataset.full === 'photo' ? p && p.att : v.files[+b.dataset.full];
+      if (att) openFull(v, att);
+    });
+    $('b-full-close').addEventListener('click', closeFull);
+    Array.prototype.forEach.call(document.querySelectorAll('.signout'), function (b) {
+      b.addEventListener('click', signOut);
+    });
     $('b-stations').addEventListener('click', function (e) {
       var b = e.target.closest('[data-gid]');
       if (b) pickStation(b.dataset.gid);
@@ -520,6 +641,7 @@
 
     // keys: ← → turn, ↑ ↓ date, G ground, P post, M misc, 1 2 3 view
     document.addEventListener('keydown', function (e) {
+      if (!$('b-full').classList.contains('hidden')) { if (e.key === 'Escape') closeFull(); return; }
       if (!state.station || $('b-viewer').classList.contains('hidden')) return;
       if (/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;      // the slider keeps its own arrows
       var k = e.key, done = true;
