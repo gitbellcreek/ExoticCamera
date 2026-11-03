@@ -30,9 +30,9 @@ Field Maps form uses, so photos from either app land in the same place:
 | Anything else | `MISC` | — |
 
 Each slot takes any number of photos. `service/` holds the scripts that built
-the service and copied the 74 older photo-station points (El_Rat_Generic and
-Cypress Creek 2020) into 48 stations; they read credentials from `ARC_USER` /
-`ARC_PASS` and are kept for the record.
+the service, copied the 74 older photo-station points (El_Rat_Generic and
+Cypress Creek 2020) into 48 stations, and built the ArcGIS Experience (below);
+they read credentials from `ARC_USER` / `ARC_PASS` and are kept for the record.
 
 ## In the field
 
@@ -77,6 +77,37 @@ New stations can be added where you stand (**+ New station here**); the ID is
 suggested from the nearest station's prefix. Stations can be edited — post
 installed, type, tag, install date, status, notes. Both go up with the next
 upload, before any visit to that station.
+
+## Looking back: the photo browser
+
+`browse.html` shows one station's photos as dates × directions. **Flip the
+date and the direction stays put; turn round the post and the date stays
+put** — so the same view can be compared visit after visit.
+
+- **Turn** with the ‹ › on the photo, the compass rose (N E S W, with
+  Eye / Ground), ← → on a keyboard, or by swiping the photo sideways.
+  **Post** and **Misc** sit beside the rose (P and M).
+- **Change date** with the date strip under the photo, ↑ ↓, or by swiping up
+  and down. A date with no photo facing the current way is dimmed, and the
+  photo says so. A slot with several photos shows *1 of 2*.
+- **Compare**: *Side by side* (one above the other on a phone) or *Swipe*,
+  a divider dragged across two dates in the same direction; both turn
+  together. *Compare with* picks the second date.
+- It opens on the latest visit that has a North photo, says where it is in the
+  address (so a view can be bookmarked or shared), shows the visit's details
+  and a *full size* link, and loads the neighbouring photos ahead.
+
+Open it from a station's sheet (**Photos**), or on its own at
+`photopoints/browse.html`, which lists the stations. It reads only, and on a
+phone where Photo Points is signed in it is signed in too.
+
+**The ArcGIS Experience** *Photo Monitoring - Station Photos*
+(`ce3fd77cef4e4d27b2e04f6d68c377ca`, private, built by
+`service/build_experience.py`) is the station map with this browser beside
+it: tapping a station hands its GlobalID to an Embed widget that loads
+`browse.html?embed=1&station=…`. An embedded page keeps its own storage, so it
+asks for an ArcGIS sign-in the first time. The script's `--layout edit` builds
+the earlier add-visits version instead.
 
 ## Bearings
 
@@ -144,16 +175,17 @@ js/config.js      service, slots, settings (page + worker)
 js/store.js       IndexedDB: visits, photo rows, photo bytes, station edits, ghosts (page + worker)
 js/arc.js         sign-in, reading stations, the upload engine (page + worker)
 js/app.js         compass and camera, the visit, the queue, all UI wiring
+browse.html       the photo browser: dates × directions, compare (+ browse.css, js/browse.js)
 sw.js             app-shell cache + background drain
-service/          the scripts that built the feature service and copied the old stations
+service/          the scripts that built the feature service, copied the old stations, and built the experience
 ```
 
 Bump `REV` in `sw.js` whenever the file list changes.
 
 ## Tests
 
-`tests/pp-upload.mjs` (node), `tests/pp-land.mjs`, `tests/pp-coexist.mjs` and
-`tests/pp-visit.mjs` (browser, no service), and `tests/pp-flow.mjs` (browser,
-live service). The last writes only under the station called **Test**, or a
+`tests/pp-upload.mjs` (node), `tests/pp-land.mjs`, `tests/pp-coexist.mjs`,
+`tests/pp-visit.mjs` and `tests/pp-browse.mjs` (browser, no service), and
+`tests/pp-flow.mjs` (browser, live service). The last writes only under the station called **Test**, or a
 station it adds, and removes only rows carrying its own GlobalIDs; the Test
 station's fields are put back as found. See `tests/README.md`.
