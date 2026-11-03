@@ -80,34 +80,48 @@ upload, before any visit to that station.
 
 ## Looking back: the photo browser
 
-`browse.html` shows one station's photos as dates × directions. **Flip the
-date and the direction stays put; turn round the post and the date stays
-put** — so the same view can be compared visit after visit.
+`browse.html` starts on a **map of the stations** (the *Photo Monitoring -
+Field Maps* web map). Tap a station, or pick one from the list (☰), and its
+photos are dates × directions. **Flip the date and the direction stays put;
+turn round the post and the date stays put** — so the same view can be
+compared visit after visit. Back (‹, or the phone's) returns to the map.
 
-- **Turn** with the ‹ › on the photo, the compass rose (N E S W, with
-  Eye / Ground), ← → on a keyboard, or by swiping the photo sideways.
-  **Post** and **Misc** sit beside the rose (P and M).
+- **Turn** with the ‹ › on the photo, the compass rose (N E S W, with Eye
+  above Ground), ← → or N E S W on a keyboard, or by swiping the photo
+  sideways. **Post** and **Misc** sit beside the rose (P and M); there the
+  ‹ › and the swipe step through that slot's photos instead of turning.
+- **Several photos in one slot** show ‹ *1 of 3* › at the photo's corner
+  ([ ] on a keyboard).
 - **Change date** with the date strip under the photo, ↑ ↓, or by swiping up
   and down. A date with no photo facing the current way is dimmed, and the
-  photo says so. A slot with several photos shows *1 of 2*.
+  photo says so.
+- **On the photo**: which way it faces (*North*, *East groundcover*, *Post*…)
+  at the top, the date and bearing at the bottom; each steps aside while the
+  pointer is on it, or while a finger is down.
+- **Full size** (the ⤢ at the photo's top right, or F) opens the original in
+  the page: scroll or pinch to zoom, drag to look round, double-click or
+  double-tap to zoom in and back out, + − ⤢ in the bar. Back closes it.
 - **Compare**: *Side by side* (one above the other on a phone) or *Swipe*,
   a divider dragged across two dates in the same direction; both turn
   together. *Compare with* picks the second date.
 - It opens on the latest visit that has a North photo, says where it is in the
-  address (so a view can be bookmarked or shared), shows the visit's details
-  and a *full size* link, and loads the neighbouring photos ahead.
+  address (so a view can be bookmarked or shared), shows the visit's details,
+  and loads the neighbouring photos ahead.
 
 Open it from a station's sheet (**Photos**), or on its own at
-`photopoints/browse.html`, which lists the stations. It reads only, and on a
-phone where Photo Points is signed in it is signed in too.
+`photopoints/browse.html`. It reads only, and on a phone where Photo Points is
+signed in it is signed in too. The map needs a connection; without one, or if
+the map library cannot load, the station list stands in for it.
 
 **The ArcGIS Experience** *Photo Monitoring - Station Photos*
 (`ce3fd77cef4e4d27b2e04f6d68c377ca`, private, built by
-`service/build_experience.py`) is the station map with this browser beside
-it: tapping a station hands its GlobalID to an Embed widget that loads
-`browse.html?embed=1&station=…`. An embedded page keeps its own storage, so it
-asks for an ArcGIS sign-in the first time. The script's `--layout edit` builds
-the earlier add-visits version instead.
+`service/build_experience.py`) is this browser and nothing else: one Embed
+widget filling the page with `browse.html?embed=1`. An embedded page keeps its
+own storage, so the first time it asks for an ArcGIS sign-in, and nothing —
+not even the map — shows until then. `--update` keeps the item's title. The
+script's `--layout browse` builds the earlier version (the experience's own
+map, with the browser beside it handed the tapped station), and
+`--layout edit` the add-visits one.
 
 ## Bearings
 
@@ -175,7 +189,7 @@ js/config.js      service, slots, settings (page + worker)
 js/store.js       IndexedDB: visits, photo rows, photo bytes, station edits, ghosts (page + worker)
 js/arc.js         sign-in, reading stations, the upload engine (page + worker)
 js/app.js         compass and camera, the visit, the queue, all UI wiring
-browse.html       the photo browser: dates × directions, compare (+ browse.css, js/browse.js)
+browse.html       the photo browser: the station map, then dates × directions (+ browse.css, js/browse.js)
 sw.js             app-shell cache + background drain
 service/          the scripts that built the feature service, copied the old stations, and built the experience
 ```

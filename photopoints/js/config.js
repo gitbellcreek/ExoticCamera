@@ -36,6 +36,7 @@
     visitsLayer: 1,
     portal: 'https://www.arcgis.com',
     appId: '',                                // OAuth 2.0 client id, if the org registered one
+    webMap: 'e785cab8a5f745e8acd63a95d8966b90', // the photo browser's map of the stations
 
     // where problem reports go — the same table as Exotic Camera's
     bugsUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/ExoticCameraBugs/FeatureServer',
