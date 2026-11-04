@@ -130,6 +130,18 @@ script's `--layout browse` builds the earlier version (the experience's own
 map, with the browser beside it handed the tapped station), and
 `--layout edit` the add-visits one.
 
+**The visit popup** in Map Viewer and Field Maps (the *Photo Monitoring -
+Field Maps* web map's Station Visits table) can carry a table of the visit's
+photos by direction — eye level and groundcover × N E S W, the post, misc —
+with each photo's bearing, each linking to that photo in this browser
+(`service/visit_popup.arcade`, set by `service/set_visit_popup.py`, which
+backs the web map up first and checks that nothing else changed). It is a
+table of links rather than labelled photos because the layer is private: a
+popup's media element loads its images with no token and gets HTTP 400, and
+only the attachments element — which stays below the table, showing every
+photo in the order taken — can load them; its keyword filter matches
+substrings ("W" finds every `LOW_` photo), so it cannot sort them either.
+
 ## Bearings
 
 The compass is `../js/compass.js`, shared with Exotic Camera. The phone's

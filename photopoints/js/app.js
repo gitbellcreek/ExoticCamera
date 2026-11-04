@@ -754,8 +754,8 @@
   function adoptVisit(sv, s) {
     var counts = {};
     sv.atts.forEach(function (a) {
-      var k = String(a.keywords || '').trim().toUpperCase();
-      if (Config.slot(k)) counts[k] = (counts[k] || 0) + 1;
+      var k = Config.slotOfKeyword(a.keywords);
+      if (k) counts[k] = (counts[k] || 0) + 1;
     });
     var a = sv.attrs;
     var v = {
@@ -1127,10 +1127,10 @@
 
   function safeName(s) { return String(s || 'station').replace(/[^A-Za-z0-9-]+/g, '-').replace(/^-+|-+$/g, '') || 'station'; }
 
-  /** e.g. LKD-PS01_N_20261026-144012_003T.jpg — the bearing travels with the file. */
+  /** e.g. LKD-PS01_North-eye-level_20261026-144012_003T.jpg — the slot and the bearing travel with the file. */
   function photoName(v, shot) {
     var d = new Date(shot.createdAt);
-    return safeName(v.stationId) + '_' + shot.slot + '_' +
+    return safeName(v.stationId) + '_' + Config.namePart(shot.slot) + '_' +
       d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) +
       (shot.heading === null ? '' : '_' + pad(Math.round(shot.heading) % 360, 3) + shot.headingRef) + '.jpg';
   }

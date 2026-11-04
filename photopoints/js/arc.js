@@ -408,8 +408,8 @@
         var pick = {};
         visits.forEach(function (v) {
           v.atts.forEach(function (a) {
-            var kw = String(a.keywords || '').trim().toUpperCase();
-            if (!g.Config.slot(kw) || kw === 'MISC' || pick[kw]) return;
+            var kw = g.Config.slotOfKeyword(a.keywords);
+            if (!kw || kw === 'MISC' || pick[kw]) return;
             pick[kw] = { oid: v.oid, att: a, visitDate: v.attrs.VisitDate };
           });
         });
@@ -694,7 +694,7 @@
         var total = Math.max(1, Math.ceil(blob.size / partSize));
 
         var register = s.uploadId ? Promise.resolve(s.uploadId) : postJson(svc + '/uploads/register', {
-          f: 'json', token: t, itemName: s.name, description: 'Photo Points ' + s.slot
+          f: 'json', token: t, itemName: s.name, description: 'Photo Points ' + g.Config.keyword(s.slot)
         }).then(function (j) {
           var id = j.item && j.item.itemID;
           if (!id) throw new Error('The service did not accept the upload');
@@ -748,7 +748,7 @@
           }).then(function () {
             return applyEdits(url, { attachments: { adds: [{
               globalId: s.attGlobalId, parentGlobalId: v.globalId, uploadId: upId,
-              name: s.name, contentType: 'image/jpeg', keywords: s.slot
+              name: s.name, contentType: 'image/jpeg', keywords: g.Config.keyword(s.slot)
             }] } }, t);
           }).then(function (j) {
             var res = ((j.attachments || {}).addResults || [])[0];

@@ -149,10 +149,10 @@
               var v = byOid[gr.parentObjectId];
               if (!v) return;
               (gr.attachmentInfos || []).slice().sort(function (a, b) { return a.id - b.id; }).forEach(function (a) {
-                var kw = String(a.keywords || '').trim().toUpperCase();
+                var kw = Config.slotOfKeyword(a.keywords);
                 var rec = { id: a.id, name: a.name || '', size: a.size, type: a.contentType || '', bearing: Arc.bearingFromName(a.name) };
                 if (!/^image\//i.test(rec.type) && !/\.(jpe?g|png|webp|heic)$/i.test(rec.name)) { v.files.push(rec); return; }
-                var slot = Config.slot(kw) ? kw : 'MISC';         // a photo with no keyword is still worth seeing
+                var slot = kw || 'MISC';                          // a photo with no keyword is still worth seeing
                 (v.photos[slot] = v.photos[slot] || []).push(rec);
                 v.count++;
               });

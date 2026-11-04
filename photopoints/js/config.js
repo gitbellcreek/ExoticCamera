@@ -14,17 +14,31 @@
      the cardinal direction to face; the target becomes the last visit's own
      bearing once there is one, so repeat photos line up with the first. */
   var SLOTS = [
-    { key: 'N', label: 'North', short: 'N', bearing: 0, group: 'eye' },
-    { key: 'E', label: 'East', short: 'E', bearing: 90, group: 'eye' },
-    { key: 'S', label: 'South', short: 'S', bearing: 180, group: 'eye' },
-    { key: 'W', label: 'West', short: 'W', bearing: 270, group: 'eye' },
-    { key: 'LOW_N', label: 'Groundcover · North', short: 'N', bearing: 0, group: 'low' },
-    { key: 'LOW_E', label: 'Groundcover · East', short: 'E', bearing: 90, group: 'low' },
-    { key: 'LOW_S', label: 'Groundcover · South', short: 'S', bearing: 180, group: 'low' },
-    { key: 'LOW_W', label: 'Groundcover · West', short: 'W', bearing: 270, group: 'low' },
-    { key: 'LOCATOR', label: 'Locator — the post', short: 'Post', bearing: null, group: 'other' },
-    { key: 'MISC', label: 'Misc', short: '+', bearing: null, group: 'other' }
+    { key: 'N', word: 'North eye level', label: 'North', short: 'N', bearing: 0, group: 'eye' },
+    { key: 'E', word: 'East eye level', label: 'East', short: 'E', bearing: 90, group: 'eye' },
+    { key: 'S', word: 'South eye level', label: 'South', short: 'S', bearing: 180, group: 'eye' },
+    { key: 'W', word: 'West eye level', label: 'West', short: 'W', bearing: 270, group: 'eye' },
+    { key: 'LOW_N', word: 'North groundcover', label: 'Groundcover · North', short: 'N', bearing: 0, group: 'low' },
+    { key: 'LOW_E', word: 'East groundcover', label: 'Groundcover · East', short: 'E', bearing: 90, group: 'low' },
+    { key: 'LOW_S', word: 'South groundcover', label: 'Groundcover · South', short: 'S', bearing: 180, group: 'low' },
+    { key: 'LOW_W', word: 'West groundcover', label: 'Groundcover · West', short: 'W', bearing: 270, group: 'low' },
+    { key: 'LOCATOR', word: 'Post', label: 'Locator — the post', short: 'Post', bearing: null, group: 'other' },
+    { key: 'MISC', word: 'Other', label: 'Misc', short: '+', bearing: null, group: 'other' }
   ];
+
+  /* The keyword a photo is saved with is its slot spelled out ("North
+     groundcover"), so a popup's attachment filter, which matches any part of
+     the keyword, can pick out a direction ("North") or a level ("groundcover")
+     cleanly. Photos saved before November 2026 carry the old shorthand (N,
+     LOW_N, LOCATOR, MISC); both are read. */
+  function slotOfKeyword(kw) {
+    var k = String(kw || '').trim().toUpperCase();
+    if (!k) return null;
+    for (var i = 0; i < SLOTS.length; i++) {
+      if (SLOTS[i].key === k || SLOTS[i].word.toUpperCase() === k || SLOTS[i].word.toUpperCase().replace(/ /g, '-') === k) return SLOTS[i].key;
+    }
+    return null;
+  }
 
   /* The order the camera moves through after each shot: both photos facing
      one way before turning, so it is one trip around the post, not two. */
@@ -107,6 +121,12 @@
     // what report.js labels a report with
     layerName: function () { return 'Photo Points'; },
     layerUrl: function () { return Config.visitsUrl(); },
+
+    slotOfKeyword: slotOfKeyword,
+
+    /** The keyword a slot's photos are saved with, and the same for a file name: North-groundcover. */
+    keyword: function (key) { var s = Config.slot(key); return s ? s.word : key; },
+    namePart: function (key) { var s = Config.slot(key); return s ? s.word.replace(/ /g, '-') : key; },
 
     slot: function (key) {
       for (var i = 0; i < SLOTS.length; i++) if (SLOTS[i].key === key) return SLOTS[i];
