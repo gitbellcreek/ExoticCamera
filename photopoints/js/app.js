@@ -478,7 +478,7 @@
   var FALLBACK = {
     PostCondition: ['Good', 'Leaning / bent', 'Damaged', 'Missing - replaced', 'Missing - not replaced'],
     PostType: ['Rebar', 'T-post', 'PVC', 'Wood stake', 'Other'],
-    StationStatus: ['Active', 'Damaged', 'Missing', 'Retired']
+    StationStatus: ['Active', 'Damaged', 'Missing', 'Retired', 'Inactive']
   };
 
   function options(meta, field) {

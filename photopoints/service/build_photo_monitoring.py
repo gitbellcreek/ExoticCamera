@@ -60,7 +60,7 @@ def coded(name, values):
 
 YES_NO = coded("PM_YesNo", ["Yes", "No"])
 POST_TYPE = coded("PM_PostType", ["Rebar", "T-post", "PVC", "Wood stake", "Other"])
-STATION_STATUS = coded("PM_StationStatus", ["Active", "Damaged", "Missing", "Retired"])
+STATION_STATUS = coded("PM_StationStatus", ["Active", "Damaged", "Missing", "Retired", "Inactive"])
 POST_CONDITION = coded(
     "PM_PostCondition",
     ["Good", "Leaning / bent", "Damaged", "Missing - replaced", "Missing - not replaced"],
