@@ -29,7 +29,12 @@ function bearingOf(name) {
 // keyword (the photo slot) -> the bearings of its photos, in the order taken
 var slots = {};
 for (var i in atts) {
-  var kw = Upper(Trim(DefaultValue(atts[i].keywords, "")));
+  // keywords are spelled out ("North groundcover") since Nov 2026; older photos carry N, LOW_N, LOCATOR, MISC
+  var kw = Replace(Upper(Trim(DefaultValue(atts[i].keywords, ""))), "-", " ");
+  var words = { "NORTH EYE LEVEL": "N", "EAST EYE LEVEL": "E", "SOUTH EYE LEVEL": "S", "WEST EYE LEVEL": "W",
+    "NORTH GROUNDCOVER": "LOW_N", "EAST GROUNDCOVER": "LOW_E", "SOUTH GROUNDCOVER": "LOW_S", "WEST GROUNDCOVER": "LOW_W",
+    "POST": "LOCATOR", "OTHER": "MISC" };
+  if (HasKey(words, kw)) { kw = words[kw]; }
   if (kw == "") { kw = "MISC"; }
   if (!HasKey(slots, kw)) { slots[kw] = []; }
   Push(slots[kw], DefaultValue(bearingOf(atts[i].name), "photo"));

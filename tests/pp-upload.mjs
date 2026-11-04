@@ -173,6 +173,15 @@ async function setup({ shots = 3, size = 600 * 1024, stationPending = false } = 
   const { Config, Store } = app;
   await Config.load();
   await Config.save({ serviceUrl: SVC, partKB: PART / 1024 });
+  if (!globalThis.__kwChecked) {
+    globalThis.__kwChecked = true;
+    // keywords: spelled out since Nov 2026 so a popup filter can pick a direction or a level; the old shorthand still reads
+    const cases = [['North groundcover', 'LOW_N'], ['north eye level', 'N'], ['West-groundcover', 'LOW_W'], ['Post', 'LOCATOR'], ['Other', 'MISC'],
+      ['N', 'N'], ['LOW_S', 'LOW_S'], ['LOCATOR', 'LOCATOR'], ['MISC', 'MISC'], ['', null], ['whatever', null]];
+    const bad = cases.filter(([k, w]) => Config.slotOfKeyword(k) !== w);
+    if (bad.length) console.log('  FAIL keywords read wrongly: ' + JSON.stringify(bad)), process.exitCode = 1;
+    else console.log('  ok   keywords: spelled-out and old shorthand both read; written as ' + Config.keyword('LOW_E') + ' / ' + Config.namePart('LOW_E'));
+  }
   await Store.set('auth', { mode: 'manual', token: 't', expires: Date.now() + 3600e3, username: 'test' });
   const stationGid = Store.guid();
   if (stationPending) {
@@ -211,7 +220,7 @@ async function settle(app, tries = 6) {
 function intact(service, blobs, app) {
   return app.Store.shots().then((shots) => shots.every((s) => {
     const a = service.attachments.find(x => norm(x.gid) === norm(s.attGlobalId));
-    return a && Buffer.compare(a.bytes, blobs[s.id]) === 0 && a.keywords === s.slot && a.name === s.name;
+    return a && Buffer.compare(a.bytes, blobs[s.id]) === 0 && a.keywords === app.Config.keyword(s.slot) && a.name === s.name;
   }));
 }
 
@@ -380,7 +389,7 @@ console.log('\n== a photo added to a visit that is already up');
   if (service.visits.length !== 1) fail(service.visits.length + ' visits'); else ok('still one visit on the layer');
   if (updatesSent(service, since)) fail('sent the unchanged details again'); else ok('the unchanged details are not sent again');
   const a = service.attachments.find(x => x.name === 'Test_MISC_9.jpg');
-  if (!a || a.parent !== service.visits[0].oid || a.keywords !== 'MISC') fail('new photo not on the visit: ' + JSON.stringify(a && { parent: a.parent, kw: a.keywords }));
+  if (!a || a.parent !== service.visits[0].oid || a.keywords !== 'Other') fail('new photo not on the visit: ' + JSON.stringify(a && { parent: a.parent, kw: a.keywords }));
   else ok('the new photo is attached to the same visit, keyworded MISC');
   if (service.attachments.length !== 3 || !await intact(service, blobs, app)) fail('photos changed or sent twice'); else ok('three photos, each once, intact');
   if ((await app.Store.visit(visit.id)).state !== 'sent') fail('visit not marked sent again'); else ok('and the visit is marked sent again');
@@ -416,7 +425,7 @@ console.log('\n== a visit that is only on the layer, added to on this phone');
   if (service.visits.length !== 1 || service.applied.slice(since).some(a => a.p.adds)) fail('the visit was added again');
   else ok('the visit is not added again');
   const a = service.attachments[0];
-  if (!a || a.parent !== 777 || a.keywords !== 'LOW_N' || !await intact(service, blobs, app)) fail('photo: ' + JSON.stringify(a && { parent: a.parent, kw: a.keywords }));
+  if (!a || a.parent !== 777 || a.keywords !== 'North groundcover' || !await intact(service, blobs, app)) fail('photo: ' + JSON.stringify(a && { parent: a.parent, kw: a.keywords }));
   else ok('the photo is attached to the visit on the layer, intact, keyworded LOW_N');
   if ((await app.Store.visit(local.id)).state !== 'sent') fail('not marked sent'); else ok('and the phone\'s copy is marked sent');
 }
