@@ -1,0 +1,70 @@
+// Photo Points: a visit's photos by direction, for the Station Visits popup (an Arcade element).
+// Each cell is a link to that photo in the Photo Points photo browser, which shows it full size,
+// labelled, with a map of which way it looks. The photos themselves are in the popup's
+// attachments element below: on this private layer only that element can load them.
+
+// every attachment, keeping the photos (the "types" option finds none on some clients)
+var all = Attachments($feature);
+var atts = [];
+for (var a in all) {
+  if (Left(Lower(DefaultValue(all[a].contentType, "")), 6) == "image/") { Push(atts, all[a]); }
+}
+if (Count(atts) == 0) { return { type: "text", text: "No photos on this visit." }; }
+
+var station = Replace(Replace(DefaultValue($feature.StationGUID, ""), "{", ""), "}", "");
+var base = "https://gitbellcreek.github.io/ExoticCamera/photopoints/browse.html?station=" + station +
+  "#v=" + $feature.OBJECTID;
+
+// Photo Points names carry the bearing: BBS-PS05_N_20261103-102648_357T.jpg
+function bearingOf(name) {
+  var parts = Split(name, "_");
+  var last = Upper(parts[Count(parts) - 1]);
+  if (Count(last) != 8 || Right(last, 4) != ".JPG") { return null; }
+  var ref = Mid(last, 3, 1);
+  var deg = Number(Left(last, 3));
+  if ((ref != "T" && ref != "M") || IsNan(deg)) { return null; }
+  return Text(deg, "000") + "°" + ref;
+}
+
+// keyword (the photo slot) -> the bearings of its photos, in the order taken
+var slots = {};
+for (var i in atts) {
+  var kw = Upper(Trim(DefaultValue(atts[i].keywords, "")));
+  if (kw == "") { kw = "MISC"; }
+  if (!HasKey(slots, kw)) { slots[kw] = []; }
+  Push(slots[kw], DefaultValue(bearingOf(atts[i].name), "photo"));
+}
+
+function link(kw, dir, level) {
+  if (!HasKey(slots, kw)) { return "<span style='color:#9aa5b1'>—</span>"; }
+  var b = slots[kw];
+  var more = IIf(Count(b) > 1, " +" + Text(Count(b) - 1), "");
+  return "<a href='" + base + "&amp;d=" + dir + "&amp;l=" + level + "&amp;m=one' target='_blank'>" + b[0] + more + "</a>";
+}
+
+var cells = "";
+var rows = [["Eye", "", "eye"], ["Ground", "LOW_", "ground"]];
+for (var r in rows) {
+  cells += "<tr><td style='text-align:left;padding:3px 6px'><b>" + rows[r][0] + "</b></td>";
+  for (var d in ["N", "E", "S", "W"]) {
+    var dir = ["N", "E", "S", "W"][d];
+    cells += "<td style='padding:3px 6px'>" + link(rows[r][1] + dir, dir, rows[r][2]) + "</td>";
+  }
+  cells += "</tr>";
+}
+
+var known = ["N", "E", "S", "W", "LOW_N", "LOW_E", "LOW_S", "LOW_W", "LOCATOR"];
+var misc = 0;
+for (var k in slots) { if (IndexOf(known, k) < 0) { misc += Count(slots[k]); } }
+
+var extra = "Post " + link("LOCATOR", "LOCATOR", "eye");
+if (misc > 0) { extra += " · Misc <a href='" + base + "&amp;d=MISC&amp;l=eye&amp;m=one' target='_blank'>" + Text(misc) + " photo" + IIf(misc == 1, "", "s") + "</a>"; }
+
+return {
+  type: "text",
+  text: "<p style='margin:0 0 4px'><b>Photos by direction</b> — tap one to open it in the photo browser</p>" +
+    "<table style='border-collapse:collapse;text-align:center'><tr><td></td>" +
+    "<td style='padding:3px 6px'><b>N</b></td><td style='padding:3px 6px'><b>E</b></td>" +
+    "<td style='padding:3px 6px'><b>S</b></td><td style='padding:3px 6px'><b>W</b></td></tr>" + cells + "</table>" +
+    "<p style='margin:4px 0 0'>" + extra + "</p>"
+};

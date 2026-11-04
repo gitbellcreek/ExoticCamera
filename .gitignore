@@ -9,3 +9,5 @@ tok*.txt
 tests/.token
 tests/.out/
 node_modules/
+# what the service scripts write when run from their folder (web map copies, configs)
+photopoints/service/out/
