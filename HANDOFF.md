@@ -268,7 +268,20 @@ imagery (PS08) and the sun (PS04) confirmed it; PS05–PS07 were right. The 19
 attachments were corrected in place on 4 November — same image, ID and
 GlobalID; slot keyword swapped (N↔S, E↔W, LOW_N↔LOW_S, LOW_E↔LOW_W; the post
 keeps LOCATOR), bearing +180° in the name and in `GPSImgDirection`:
-visit 25 #76–#84, visit 20 #33–#41, visit 21 #42.
+visit 25 #76–#84, visit 20 #33–#41, visit 21 #42. On 4 November the user, who
+was there, saw that BBS-PS04's visit 20 was in fact 90° out, not 180°: its
+photos were turned a further 90° (labelled W at 269° → South at 179°; N → W,
+E → N, S → E, groundcover and post likewise). #42 was left at 160°.
+
+**Photo keywords are spelled out (4 November 2026):** `North eye level`,
+`North groundcover`, …, `Post`, `Other`, and the same in file names
+(`BBS-PS05_North-groundcover_…_359T.jpg`). Popup attachment filters match any
+part of a keyword, so with the old shorthand `W` also found every `LOW_` photo
+and `S` found `MISC`; now the Station Visits popup has clean North / East /
+South / West / Post / Other sections. All 52 photos on the layer were renamed
+in place (same image, ID, GlobalID) and the Field Maps form's photo slots use
+the new keywords. The app, the browser and the Arcade table still read the old
+shorthand (`Config.slotOfKeyword`); internal slot codes are unchanged.
 
 Now the tracker forgets north after a gap of 2 s, or when the app reports the
 page hidden (`tracker.interrupt()`, both apps), waits a second for Core
