@@ -101,6 +101,13 @@ compared visit after visit. Back (‹, or the phone's) returns to the map.
 - **Full size** (the ⤢ at the photo's top right, or F) opens the original in
   the page: scroll or pinch to zoom, drag to look round, double-click or
   double-tap to zoom in and back out, + − ⤢ in the bar. Back closes it.
+- **A minimap** beside the photo: the post on satellite imagery (Esri World
+  Imagery, north up, with a scale bar and + −), and a cone along the photo's
+  recorded bearing showing roughly what it takes in — about 67° across a
+  landscape photo, 53° across a portrait one; short for groundcover. Comparing
+  two dates draws both (A blue, B amber). A photo with no bearing in its name,
+  or a slot with no photo that day, gets a dashed cone along the slot's own
+  direction.
 - **Compare**: *Side by side* (one above the other on a phone) or *Swipe*,
   a divider dragged across two dates in the same direction; both turn
   together. *Compare with* picks the second date.
