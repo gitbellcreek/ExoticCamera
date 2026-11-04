@@ -197,6 +197,37 @@ body.embedded[data-view="b-map"] .msg { top: 65px; }
 }
 
 .details { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: 13px; }
+
+/* the minimap: the post on satellite imagery, north up, and the cone the photo takes in */
+.minimap { display: grid; gap: 4px; min-width: 0; }
+.mm-map {
+  position: relative; width: 100%; height: 260px; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 12px; background: #2b3440;
+}
+.mm-tiles, .mm-over { position: absolute; inset: 0; }
+.mm-tiles img { position: absolute; max-width: none; user-select: none; -webkit-user-drag: none; }
+.mm-over { width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.mm-cone { fill: rgba(47, 123, 255, .3); stroke: #fff; stroke-width: 1.5; stroke-linejoin: round; }
+.mm-cone.b { fill: rgba(255, 176, 32, .3); }
+.mm-cone.nominal { fill-opacity: .45; stroke-dasharray: 5 4; }
+.mm-ray { stroke: #2f7bff; stroke-width: 3; stroke-linecap: round; }
+.mm-ray.b { stroke: #ffb020; }
+.mm-ray.nominal { stroke-dasharray: 6 5; }
+.mm-tip { fill: #2f7bff; stroke: #fff; stroke-width: 1; }
+.mm-tip.b { fill: #ffb020; }
+.mm-post { fill: #fff; stroke: #e0245e; stroke-width: 3; }
+.mm-scale { stroke: #fff; stroke-width: 2; }
+.mm-scale-t { fill: #fff; font: 600 10px system-ui, sans-serif; paint-order: stroke; stroke: rgba(0, 0, 0, .7); stroke-width: 3px; }
+.mm-north, .mm-attr { position: absolute; color: #fff; text-shadow: 0 0 3px #000, 0 0 1px #000; pointer-events: none; }
+.mm-north { top: 6px; left: 8px; font-size: 12px; font-weight: 800; }
+.mm-attr { right: 5px; bottom: 2px; font-size: 9px; opacity: .9; }
+.mm-zoom { position: absolute; top: 6px; right: 6px; display: grid; gap: 4px; }
+.mm-zoom button {
+  width: 30px; height: 30px; border: 0; border-radius: 8px; background: rgba(255, 255, 255, .92);
+  color: #18212e; font-size: 18px; line-height: 1; box-shadow: 0 1px 3px rgba(0, 0, 0, .35);
+}
+.mm-zoom button:disabled { opacity: .45; cursor: default; }
+.mm-cap { margin: 0; font-size: 12px; color: var(--dim); }
 .details dt { color: var(--dim); }
 .details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .keys { margin: 0; font-size: 11px; color: var(--dim); }
@@ -212,6 +243,7 @@ body.embedded[data-view="b-map"] .msg { top: 65px; }
   .stage-wrap { display: flex; flex-direction: column; min-height: 0; }
   .stage, .stage.side { flex: 1; height: auto; min-height: 300px; aspect-ratio: auto; max-height: none; }
   .side { max-height: 100%; overflow-y: auto; }
+  .mm-map { height: auto; aspect-ratio: 1 / 1; }
 }
 
 /* ── the station list ──────────────────────────────────────────── */

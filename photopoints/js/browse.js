@@ -320,6 +320,7 @@
     renderDirs();
     renderDates();
     renderDetails();
+    renderMini();
     saveHash();
     preload();
   }
@@ -377,7 +378,11 @@
         empty.innerHTML = 'This photo could not be loaded<small>' + esc(p.att.name) + '</small>';
         empty.classList.remove('hidden');
       };
-      img.onload = function () { if (shown[el.id] === key) el.classList.remove('loading'); };
+      img.onload = function () {
+        if (shown[el.id] !== key) return;
+        el.classList.remove('loading');
+        renderMini();                                    // portrait or landscape: the cone's width
+      };
       img.onerror = function () { broken(null); };
       getPhoto(v, p.att).then(function (url) { if (shown[el.id] === key) img.src = url; }, broken);
     }
@@ -474,6 +479,100 @@
       }).join(', ') + '</dd>';
     }
     $('b-details').innerHTML = html;
+  }
+
+  /* ───────── the minimap: the post on satellite imagery, and which way the photo looks ───────── */
+
+  // Esri's World Imagery — the imagery under the map — as public tiles, no token
+  var TILES = 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/';
+  var FOV = { wide: 67, tall: 53 };     // what an iPhone's main camera takes in across a landscape / portrait photo, degrees
+  var CARDS = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+  var mini = { z: 17, drawn: null };
+
+  /** A point's place in a zoom level's pixel grid (Web Mercator, 256-pixel tiles). */
+  function worldPx(lat, lon, z) {
+    var n = 256 * Math.pow(2, z), s = Math.sin(lat * Math.PI / 180);
+    return { x: (lon + 180) / 360 * n, y: (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n };
+  }
+
+  /** The tiles under the minimap, centred on the post; drawn again only when the station, zoom or size changes. */
+  function tileMini(st, w, h) {
+    var dpr = window.devicePixelRatio || 1;
+    var key = [st.gid, mini.z, Math.round(w), Math.round(h), dpr].join('|');
+    if (mini.drawn === key) return;
+    mini.drawn = key;
+    var hi = dpr >= 1.5 && mini.z < 19 ? 1 : 0;           // a sharp picture on a dense screen: the next zoom's tiles at half size
+    var tz = mini.z + hi, ts = 256 >> hi, max = Math.pow(2, tz);
+    var c = worldPx(st.lat, st.lon, tz);
+    var left = c.x * ts / 256 - w / 2, top = c.y * ts / 256 - h / 2, html = '';
+    for (var ty = Math.floor(top / ts); ty <= Math.floor((top + h) / ts); ty++) {
+      if (ty < 0 || ty >= max) continue;
+      for (var tx = Math.floor(left / ts); tx <= Math.floor((left + w) / ts); tx++) {
+        html += '<img alt="" draggable="false" src="' + TILES + tz + '/' + ty + '/' + ((tx % max) + max) % max + '" style="left:' +
+          (tx * ts - left).toFixed(1) + 'px;top:' + (ty * ts - top).toFixed(1) + 'px;width:' + ts + 'px;height:' + ts + 'px">';
+      }
+    }
+    $('b-mini-tiles').innerHTML = html;
+  }
+
+  /** Which way a date's photo in this slot looks: its own bearing (true north) if it has one, else the slot's direction. */
+  function lookOf(i) {
+    var v = state.visits[i];
+    if (!v) return null;
+    var slot = slotKey(), p = pickAt(i, slot), b = p && p.att.bearing;
+    if (b) return { deg: b.ref === 'M' ? ((b.deg + (+Config.get().declination || 0)) % 360 + 360) % 360 : b.deg, own: true };
+    var s = Config.slot(slot);
+    return s && s.bearing !== null ? { deg: s.bearing, own: false, none: !p } : null;
+  }
+
+  function renderMini() {
+    var st = state.station;
+    var has = !!st && typeof st.lat === 'number' && typeof st.lon === 'number';
+    $('b-mini').classList.toggle('hidden', !has);
+    if (!has || state.view !== 'b-viewer') return;
+    var box = $('b-mini-map').getBoundingClientRect(), w = box.width, h = box.height;
+    if (!w || !h) return;
+    tileMini(st, w, h);
+    $('b-mini-in').disabled = mini.z >= 19;
+    $('b-mini-out').disabled = mini.z <= 14;
+
+    var cx = w / 2, cy = h / 2, R = Math.min(w, h) / 2 - 8, D = Math.PI / 180;
+    var low = state.level === 'ground' && isDir(state.dir);  // groundcover: the ground just in front
+    var at = function (deg, r) { return [cx + r * Math.sin(deg * D), cy - r * Math.cos(deg * D)]; };
+    var xy = function (q) { return q[0].toFixed(1) + ',' + q[1].toFixed(1); };
+    var svg = '', said = [];
+    var panes = [[state.i, 'pane-a', 'a', 'A']];
+    if (state.mode !== 'one' && state.j !== null) panes.push([state.j, 'pane-b', 'b', 'B']);
+    panes.forEach(function (x) {
+      var k = lookOf(x[0]);
+      if (!k) return;
+      var im = $(x[1]).querySelector('img');
+      var half = (!im.naturalWidth || im.naturalWidth >= im.naturalHeight ? FOV.wide : FOV.tall) / 2;
+      var r = low ? R * 0.32 : R, cls = x[2] + (k.own ? '' : ' nominal');
+      var tip = at(k.deg, r), base = at(k.deg, r - 13), nx = Math.cos(k.deg * D) * 6, ny = Math.sin(k.deg * D) * 6;
+      svg += '<path class="mm-cone ' + cls + '" d="M' + xy([cx, cy]) + ' L' + xy(at(k.deg - half, r)) +
+        ' A' + r.toFixed(1) + ',' + r.toFixed(1) + ' 0 0 1 ' + xy(at(k.deg + half, r)) + ' Z"/>' +
+        '<line class="mm-ray ' + cls + '" data-deg="' + k.deg + '" x1="' + cx.toFixed(1) + '" y1="' + cy.toFixed(1) +
+        '" x2="' + base[0].toFixed(1) + '" y2="' + base[1].toFixed(1) + '"/>' +
+        '<path class="mm-tip ' + cls + '" d="M' + xy(tip) + ' L' + xy([base[0] + nx, base[1] + ny]) + ' L' + xy([base[0] - nx, base[1] - ny]) + ' Z"/>';
+      said.push((panes.length > 1 ? x[3] + ': ' : '') + (k.own
+        ? pad(Math.round(k.deg) % 360, 3) + '°T (' + CARDS[Math.round(k.deg / 22.5) % 16] + ')'
+        : (k.none ? 'no photo on this date' : 'no bearing recorded with this photo') + ' — dashed, the way ' + slotName(slotKey()).toLowerCase() + ' faces'));
+    });
+    svg += '<circle class="mm-post" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="5"/>';
+
+    // a scale bar: a round number of metres, 40–110 pixels long
+    var mpp = 156543.03392 * Math.cos(st.lat * D) / Math.pow(2, mini.z), len = 5;
+    [5, 10, 20, 50, 100, 200, 500, 1000].some(function (m) { len = m; return m / mpp >= 40; });
+    var px = len / mpp, sy = h - 14;
+    svg += '<path class="mm-scale" d="M8,' + (sy - 4) + ' V' + sy + ' H' + (8 + px).toFixed(1) + ' V' + (sy - 4) + '" fill="none"/>' +
+      '<text class="mm-scale-t" x="10" y="' + (sy - 6) + '">' + (len >= 1000 ? len / 1000 + ' km' : len + ' m') + '</text>';
+
+    var over = $('b-mini-over');
+    over.setAttribute('viewBox', '0 0 ' + w.toFixed(1) + ' ' + h.toFixed(1));
+    over.innerHTML = svg;
+    $('b-mini-cap').textContent = !said.length ? 'No bearing recorded for this photo'
+      : said.length > 1 ? said.join(' · ') : /^\d/.test(said[0]) ? 'Facing ' + said[0] : said[0].charAt(0).toUpperCase() + said[0].slice(1);
   }
 
   /* Neighbouring photos load ahead, so flipping, turning and paging do not wait. */
@@ -960,6 +1059,8 @@
       state.visits = [];
       state.stations = null;
       $('b-stations').innerHTML = '';
+      mini.drawn = null;
+      $('b-mini-tiles').innerHTML = '';
       forgetPhotos();
       message('Signed out.');
       show('b-signin');
@@ -1034,6 +1135,9 @@
       else pageSlot(i, b.classList.contains('pg-next') ? 1 : -1);
     });
     $('b-full-close').addEventListener('click', closeFull);
+    $('b-mini-in').addEventListener('click', function () { mini.z = Math.min(19, mini.z + 1); renderMini(); });
+    $('b-mini-out').addEventListener('click', function () { mini.z = Math.max(14, mini.z - 1); renderMini(); });
+    if (typeof ResizeObserver === 'function') new ResizeObserver(function () { renderMini(); }).observe($('b-mini-map'));
     wireZoom();
     Array.prototype.forEach.call(document.querySelectorAll('.signout'), function (b) {
       b.addEventListener('click', signOut);

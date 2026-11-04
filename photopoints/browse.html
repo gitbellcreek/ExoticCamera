@@ -81,6 +81,19 @@
 
 
       <dl class="details" id="b-details"></dl>
+      <section class="minimap hidden" id="b-mini" aria-label="Which way the photo looks, on satellite imagery">
+        <div class="mm-map" id="b-mini-map">
+          <div class="mm-tiles" id="b-mini-tiles"></div>
+          <svg class="mm-over" id="b-mini-over" aria-hidden="true"></svg>
+          <span class="mm-north" aria-hidden="true">N ↑</span>
+          <div class="mm-zoom">
+            <button id="b-mini-in" aria-label="Zoom the minimap in" title="Zoom in">+</button>
+            <button id="b-mini-out" aria-label="Zoom the minimap out" title="Zoom out">−</button>
+          </div>
+          <span class="mm-attr">Esri, Maxar, Earthstar Geographics</span>
+        </div>
+        <p class="mm-cap" id="b-mini-cap"></p>
+      </section>
       <button class="linkish signout">Sign out of ArcGIS on this device</button>
       <p class="keys"><span class="k-keys">← → turn (at Post and Misc: the next photo) · N E S W face · [ ] photos in this slot · ↑ ↓ date · G ground · P post · M misc · F full size · 1 2 3 view</span><span class="k-touch">Swipe the photo sideways to turn (at Post and Misc: the next photo), up or down to change the date</span></p>
     </div>

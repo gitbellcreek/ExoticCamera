@@ -132,10 +132,29 @@ async function fakeArcGIS(ctx) {
   });
 }
 
+// the minimap's satellite tiles: a made-up picture per tile, and a note of which were asked for
+const tiles = [];
+async function fakeImagery(ctx) {
+  await ctx.route('**://services.arcgisonline.com/**', (route) => {
+    const m = /\/World_Imagery\/MapServer\/tile\/(\d+)\/(\d+)\/(\d+)$/.exec(new URL(route.request().url()).pathname);
+    if (!m) return route.abort('internetdisconnected');
+    tiles.push(m.slice(1).join('/'));
+    return route.fulfill({ status: 200, contentType: 'image/svg+xml', headers: { 'access-control-allow-origin': '*' },
+      body: `<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256"><rect width="256" height="256" fill="#4a6b3a" stroke="#86a96f"/>` +
+        `<text x="8" y="20" font-size="14" fill="#fff" font-family="sans-serif">${m.slice(1).join('/')}</text></svg>` });
+  });
+}
+/** The tile a point is in, at a zoom: z/y/x as the tile service names it. */
+const tileOf = (lat, lon, z) => {
+  const n = 2 ** z, s = Math.sin(lat * Math.PI / 180);
+  return z + '/' + Math.floor((0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * n) + '/' + Math.floor((lon + 180) / 360 * n);
+};
+
 const browser = await chromium.launch({ executablePath: CHROME });
 const ctx = await browser.newContext({ viewport: { width: 393, height: 852 }, isMobile: true, hasTouch: true, serviceWorkers: 'block',
   timezoneId: 'America/New_York' });
 await fakeArcGIS(ctx);
+await fakeImagery(ctx);
 // anything the page's Content-Security-Policy blocks is recorded
 await ctx.addInitScript(() => {
   window.__csp = [];
@@ -158,6 +177,17 @@ async function expectPhoto(what, oid, kw, nth = 0, pane = 'a') {
   if (s.id !== want) fail(`${what}: expected #${want}, showing ${JSON.stringify(s)}`); else ok(`${what}: ${s.label} · ${s.caption}`);
 }
 const key = async (k) => { await page.keyboard.press(k); await page.waitForTimeout(150); };
+// the minimap's arrows: the bearing each says, and the angle it is actually drawn at
+const arrows = () => page.evaluate(() => [...document.querySelectorAll('#b-mini-over .mm-ray')].map((l) => {
+  const x1 = +l.getAttribute('x1'), y1 = +l.getAttribute('y1'), x2 = +l.getAttribute('x2'), y2 = +l.getAttribute('y2');
+  return { cls: l.getAttribute('class').replace(/^mm-ray /, ''), deg: +l.dataset.deg, drawn: Math.round(((Math.atan2(x2 - x1, y1 - y2) * 180 / Math.PI) + 360) % 360) % 360 };
+}));
+async function expectArrows(what, want) {          // want: [[class, degrees], …]
+  const got = await arrows();
+  const good = got.length === want.length && want.every(([c, d], n) => got[n].cls === c && got[n].deg === d && got[n].drawn === d);
+  if (!good) fail(`${what}: arrows ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`);
+  else ok(`${what}: ${want.map(([c, d]) => c + ' ' + d + '°').join(', ')} — ${await page.textContent('#b-mini-cap')}`);
+}
 const snap = (name, pg = page) => pg.screenshot({ path: new URL('./.out/pp-browse-' + name + '.png', import.meta.url).pathname });
 const visible = (sel, pg = page) => pg.evaluate((s) => { const e = document.querySelector(s); return !!e && !!e.offsetParent && getComputedStyle(e).visibility !== 'hidden'; }, sel);
 const viewIs = (pg = page) => pg.evaluate(() => window.PhotoBrowser.state.view);
@@ -230,10 +260,19 @@ try {
     return { label: Math.abs((lab.left + lab.right) / 2 - (st.left + st.right) / 2) < 2 && lab.top - st.top < 20, full: st.right - full.right < 20 && full.top - st.top < 20 };
   });
   if (!over.label || !over.full) fail('on the photo: ' + JSON.stringify(over)); else ok('the direction at the top of the photo, full size at its top right');
+  await page.waitForTimeout(300);
+  const centre = tileOf(28.17, -82.54, 17);
+  if (!await page.isVisible('#b-mini') || !tiles.includes(centre) || tiles.some((t) => !t.startsWith('17/'))) fail('minimap tiles: ' + JSON.stringify(tiles));
+  else ok(`the minimap shows the satellite tiles round the post (${tiles.length} at zoom 17, with ${centre} under it)`);
+  await expectArrows('the minimap points the way the photo looks (its own bearing)', [['a', 0]]);
+  const post = await page.evaluate(() => { const c = document.querySelector('#b-mini-over .mm-post'), r = document.getElementById('b-mini-map').getBoundingClientRect();
+    return Math.abs(+c.getAttribute('cx') - r.width / 2) < 1 && Math.abs(+c.getAttribute('cy') - r.height / 2) < 1; });
+  if (!post) fail('the post is not in the middle of the minimap'); else ok('with the post in the middle');
 
   step('turn: the date stays');
   await page.click('#b-turn-right');
   await expectPhoto('turn right', 13, 'E');
+  await expectArrows('the minimap turns with it', [['a', 7]]);
   await page.click('#b-turn-left');
   await page.click('#b-turn-left');
   await expectPhoto('turn left twice', 13, 'W');
@@ -265,6 +304,7 @@ try {
   const none = await shown();
   if (!/^No east groundcover photo on 2025-03-20/.test(none.empty || '')) fail('missing slot: ' + JSON.stringify(none)); else ok('a slot with no photo says so: ' + none.empty);
   if (!(await page.locator('.chip.on.none').count())) fail('the date chip is not dimmed for the missing photo'); else ok('and its date is dimmed');
+  await expectArrows('no photo, so the minimap shows the slot\'s own direction, dashed', [['a nominal', 90]]);
   await key('ArrowDown');
   await expectPhoto('↓ again', 11, 'LOW_E');
   await key('ArrowDown');
@@ -395,6 +435,7 @@ try {
   await key('ArrowRight');
   await expectPhoto('both turn: A', 13, 'E');
   await expectPhoto('both turn: B', 11, 'E', 0, 'b');
+  await expectArrows('the minimap shows both dates\' photos', [['a', 7], ['b', 7]]);
   await page.click('#pane-b .fullbtn');
   await page.locator('#b-full-body img').waitFor({ timeout: 5000 });
   const bname = await page.textContent('#b-full-name');
@@ -528,13 +569,21 @@ try {
   const after2 = await op();
   if (before2 !== '1' || during !== '0' || after2 !== '1') fail('label on hover: ' + [before2, during, after2].join(' → ')); else ok('the direction label fades while the pointer is on it, and comes back');
 
+  const tilesBefore = tiles.length;
+  await page.click('#b-mini-in');
+  await page.waitForTimeout(300);
+  const z18 = tiles.slice(tilesBefore);
+  if (!z18.length || z18.some((t) => !t.startsWith('18/')) || !z18.includes(tileOf(28.17, -82.54, 18))) fail('minimap zoom: ' + JSON.stringify(z18));
+  else ok(`+ zooms the minimap in (${z18.length} tiles at zoom 18), still centred on the post`);
+  await snap('minimap-desktop');
+
   step('nothing off-screen, phone and desktop');
   for (const [w, h] of [[393, 852], [375, 667], [1280, 800]]) {
     await page.setViewportSize({ width: w, height: h });
     await page.waitForTimeout(250);
     const r = await page.evaluate(() => {
       const vw = innerWidth;
-      const out = ['#b-turn-left', '#b-turn-right', '#b-rose', '.extras', '#b-chips', '#b-older', '#b-newer', '#pane-a .fullbtn', '#pane-a .slotlabel']
+      const out = ['#b-turn-left', '#b-turn-right', '#b-rose', '.extras', '#b-chips', '#b-older', '#b-newer', '#pane-a .fullbtn', '#pane-a .slotlabel', '#b-mini-map']
         .map((s) => [s, document.querySelector(s).getBoundingClientRect()])
         .filter(([, b]) => b.left < -1 || b.right > vw + 1 || b.width === 0).map(([s]) => s);
       const rose = document.querySelector('[data-level="eye"]').getBoundingClientRect(), gnd = document.querySelector('[data-level="ground"]').getBoundingClientRect();
