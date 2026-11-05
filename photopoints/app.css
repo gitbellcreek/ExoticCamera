@@ -340,6 +340,7 @@ body.view-home #toasts { bottom: calc(var(--safe-b) + 84px); }
 
 .fld { display: block; margin: 10px 0; font-size: 13px; color: var(--dim); }
 .fld > span { display: block; margin-bottom: 5px; }
+.fld > span .src { font-style: normal; font-weight: 400; opacity: .6; margin-left: 6px; font-size: .9em; }
 .fld input[type=text], .fld input[type=url], .fld input[type=number], .fld input[type=password],
 .fld input[type=date], .fld select, .fld textarea {
   width: 100%; padding: 11px 12px; border-radius: 10px;
