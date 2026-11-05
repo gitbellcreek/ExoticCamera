@@ -33,7 +33,8 @@
     stream: null,
     meta: { stations: null, visits: null },
     progress: {},
-    sheetStation: null
+    sheetStation: null,
+    units: []
   };
 
   /* ───────────────────────────── basics ───────────────────────────── */
@@ -401,6 +402,7 @@
         scheduleRender();
       }
       if (sheetOpen('station-panel')) renderStationGuide();
+      followUnit();
     }, function (err) {
       state.gpsError = err.code;
       if (err.code === err.PERMISSION_DENIED) {
@@ -461,6 +463,15 @@
     if ('StationID' in a) s.id = a.StationID;
     if ('SiteName' in a) s.site = a.SiteName;
     if ('MgmtUnit' in a) s.mu = a.MgmtUnit;
+  }
+
+  /* Management unit boundaries, kept on the phone: they fill in a new station's unit. */
+  function loadUnits(force) {
+    return Store.get('units').then(function (rec) {
+      if (rec && rec.list) state.units = rec.list;
+      if (!state.auth || !state.online) return null;
+      return Arc.units(force).then(function (r) { if (r && r.list) state.units = r.list; });
+    }).catch(function (e) { Report.note('units', Arc.asError(e).message); });
   }
 
   function useStations(rec) {
@@ -1553,6 +1564,14 @@
     }).then(function () { if (state.online && Config.get().autoSync) sync(true); });
   }
 
+  /** While the new-station sheet is open, the unit follows the GPS — until it is typed in. */
+  var npMuTouched = false;
+  function followUnit() {
+    if (npMuTouched || !state.pos || !sheetOpen('new-panel')) return;
+    var u = Arc.unitAt(state.units, state.pos.coords.latitude, state.pos.coords.longitude);
+    if (u && $('np-mu').value !== u.id) { $('np-mu').value = u.id; $('np-mu-src').textContent = 'from the management unit map'; }
+  }
+
   var newPost = 'No';
   function openNewStation() {
     if (!state.pos) { toast('Waiting for a GPS fix to place the station', 'warn', 3500); return; }
@@ -1566,9 +1585,12 @@
     $('np-where').textContent = p.latitude.toFixed(6) + ', ' + p.longitude.toFixed(6) + ' · GPS ±' + Math.round(p.accuracy) + ' m' +
       (p.accuracy > 15 ? ' — wait for a better fix if you can' : '') +
       (near ? ' · nearest station ' + near.id + ' (' + fmtDist(nearD) + ')' : '');
+    var unit = Arc.unitAt(state.units, p.latitude, p.longitude);
     $('np-id').value = suggestId(near);
-    $('np-site').value = near && nearD < 3000 ? near.site : '';
-    $('np-mu').value = near && nearD < 300 ? near.mu : '';
+    $('np-site').value = near && nearD < 3000 ? near.site : unit ? unit.site : '';
+    npMuTouched = false;
+    $('np-mu').value = unit ? unit.id : near && nearD < 300 ? near.mu : '';
+    $('np-mu-src').textContent = unit ? 'from the management unit map' : state.units.length ? 'outside every unit on the map' : '';
     $('np-notes').value = '';
     $('np-schedule').value = fieldDefault(state.meta.stations, 'Schedule') || DEFAULT_SCHEDULE;
     newPost = 'No';
@@ -1956,7 +1978,7 @@
 
   function afterSignIn() {
     closeSheets();
-    return renderAuth().then(function () { return loadStations(true); }).then(function () { return sync(true); });
+    return renderAuth().then(function () { return loadStations(true); }).then(function () { loadUnits(); return sync(true); });
   }
 
   /* ── offline prep ─────────────────────────────────────────────── */
@@ -2099,6 +2121,7 @@
     $('search').addEventListener('input', renderStations);
     $('refresh-btn').addEventListener('click', function () { Sound.unlock(); loadStations(true); });
     $('new-station-btn').addEventListener('click', function () { Sound.unlock(); openNewStation(); });
+    $('np-mu').addEventListener('input', function () { npMuTouched = true; $('np-mu-src').textContent = ''; });
     $('nudge-signin').addEventListener('click', function () { openSheet('signin-panel'); });
     $('menu-btn').addEventListener('click', function () {
       Sound.unlock(); Sound.tick();
@@ -2323,8 +2346,8 @@
       } else {
         startCompass();
       }
-      if (state.auth && state.online) loadStations();
-      else refreshMeta();
+      if (state.auth && state.online) loadStations().then(function () { return loadUnits(); });
+      else { refreshMeta(); loadUnits(); }
       return pruneLocalCopies();
     }).then(function () {
       Report.flushHeld();

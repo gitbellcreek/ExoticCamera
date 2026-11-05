@@ -51,6 +51,8 @@
     portal: 'https://www.arcgis.com',
     appId: '',                                // OAuth 2.0 client id, if the org registered one
     webMap: 'e785cab8a5f745e8acd63a95d8966b90', // the photo browser's map of the stations
+    // management unit boundaries: a new station's unit is filled in from these (MU_ID, e.g. BBS_23a)
+    unitsUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/CELM_MU_202405/FeatureServer/0',
 
     // where problem reports go — the same table as Exotic Camera's
     bugsUrl: 'https://services.arcgis.com/apTfC6SUmnNfnxuF/arcgis/rest/services/ExoticCameraBugs/FeatureServer',

@@ -288,6 +288,65 @@
     },
 
     /**
+     * The management unit boundaries, simplified (~5 m) and kept on the phone, so
+     * a new station's unit can be filled in with no signal. Fetched again weekly.
+     * Each: { id: 'BBS_23a', site: 'Balm-Boyette Scrub', b: [minX, minY, maxX, maxY], r: rings }.
+     */
+    units: function (force) {
+      var url = String(g.Config.get().unitsUrl || '').replace(/\/+$/, '');
+      if (!url) return Promise.resolve(null);
+      return g.Store.get('units').then(function (cached) {
+        if (!force && cached && cached.url === url && Date.now() - cached.at < 7 * 86400000) return cached;
+        var list = [];
+        var page = function (t, offset) {
+          return postJson(url + '/query', {
+            f: 'json', token: t, where: '1=1', outFields: 'MU_ID,SITE_NAME', returnGeometry: true, outSR: 4326,
+            maxAllowableOffset: 0.00005, geometryPrecision: 6, resultOffset: offset, resultRecordCount: 1000
+          }, TIMEOUTS.edit).then(function (j) {
+            (j.features || []).forEach(function (f) {
+              var rings = f.geometry && f.geometry.rings;
+              if (!rings || !rings.length || !f.attributes.MU_ID) return;
+              var b = [Infinity, Infinity, -Infinity, -Infinity];
+              rings.forEach(function (ring) { ring.forEach(function (p) {
+                if (p[0] < b[0]) b[0] = p[0]; if (p[1] < b[1]) b[1] = p[1];
+                if (p[0] > b[2]) b[2] = p[0]; if (p[1] > b[3]) b[3] = p[1];
+              }); });
+              list.push({ id: String(f.attributes.MU_ID), site: f.attributes.SITE_NAME || '', b: b, r: rings });
+            });
+            if (j.exceededTransferLimit && (j.features || []).length) return page(t, offset + j.features.length);
+            return null;
+          });
+        };
+        return token().then(function (t) { return page(t, 0); }).then(function () {
+          if (!list.length) throw new Error('no management units came back');
+          var rec = { at: Date.now(), url: url, list: list };
+          return g.Store.set('units', rec).then(function () { return rec; });
+        }).catch(function (e) {
+          if (cached) return cached;                   // offline: last week's boundaries are fine
+          throw e;
+        });
+      });
+    },
+
+    /** The unit a point falls in (the smallest, where two overlap), or null. */
+    unitAt: function (list, lat, lon) {
+      var best = null, bestArea = Infinity;
+      (list || []).forEach(function (u) {
+        if (lon < u.b[0] || lon > u.b[2] || lat < u.b[1] || lat > u.b[3]) return;
+        var inside = false;                            // even-odd over every ring, so holes stay out
+        u.r.forEach(function (ring) {
+          for (var i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+            var xi = ring[i][0], yi = ring[i][1], xj = ring[j][0], yj = ring[j][1];
+            if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+          }
+        });
+        var area = (u.b[2] - u.b[0]) * (u.b[3] - u.b[1]);
+        if (inside && area < bestArea) { best = u; bestArea = area; }
+      });
+      return best;
+    },
+
+    /**
      * Every station, with when each was last visited. Cached on the device,
      * so the list and the guidance work with no signal at all.
      */
