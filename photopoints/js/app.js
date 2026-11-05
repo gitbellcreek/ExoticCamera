@@ -439,6 +439,7 @@
             gid: e.globalId, oid: null, id: e.attrs.StationID, site: e.attrs.SiteName || '', mu: e.attrs.MgmtUnit || '',
             habitat: '', postInstalled: e.attrs.PostInstalled || '', postType: e.attrs.PostType || '', postTag: '',
             installDate: e.attrs.InstallDate || null, status: e.attrs.StationStatus || '', notes: e.attrs.Notes || '',
+            schedule: e.attrs.Schedule || '',
             lat: e.lat, lon: e.lon, pending: true
           });
         } else if (s) {
@@ -455,6 +456,7 @@
     if ('PostTag' in a) s.postTag = a.PostTag;
     if ('InstallDate' in a) s.installDate = a.InstallDate;
     if ('StationStatus' in a) s.status = a.StationStatus;
+    if ('Schedule' in a) s.schedule = a.Schedule;
     if ('Notes' in a) s.notes = a.Notes;
     if ('StationID' in a) s.id = a.StationID;
     if ('SiteName' in a) s.site = a.SiteName;
@@ -509,6 +511,14 @@
     PostType: ['Rebar', 'T-post', 'PVC', 'Wood stake', 'Other'],
     StationStatus: ['Active', 'Damaged', 'Missing', 'Retired', 'Inactive']
   };
+
+  /* How often a station is visited: free text, so anything can be typed; new
+     stations start with the layer's default (once a year in the fall). */
+  var DEFAULT_SCHEDULE = 'Once a year: October';
+  function fieldDefault(meta, name) {
+    var f = meta && (meta.fields || []).filter(function (x) { return x.name.toLowerCase() === name.toLowerCase(); })[0];
+    return f && f.defaultValue !== undefined && f.defaultValue !== null ? String(f.defaultValue) : '';
+  }
 
   function options(meta, field) {
     var cv = meta ? Arc.domain(meta, field) : [];
@@ -627,7 +637,7 @@
       ['Site', s.site], ['Unit', s.mu], ['Habitat', s.habitat],
       ['Post', s.postInstalled === 'Yes' ? 'Installed' + (s.postType ? ' · ' + s.postType : '') + (s.postTag ? ' · ' + s.postTag : '') : 'No post'],
       ['Installed', s.installDate ? fmtDate(s.installDate) : ''],
-      ['Status', s.status], ['Last visit', lv ? fmtDate(lv) + ((state.stats[gid] || {}).count > 1 ? ' (' + state.stats[gid].count + ' visits)' : '') : ''],
+      ['Status', s.status], ['Schedule', s.schedule], ['Last visit', lv ? fmtDate(lv) + ((state.stats[gid] || {}).count > 1 ? ' (' + state.stats[gid].count + ' visits)' : '') : ''],
       ['Notes', s.notes]
     ].filter(function (f) { return f[1]; });
     $('sp-facts').innerHTML = facts.map(function (f) { return '<dt>' + esc(f[0]) + '</dt><dd>' + esc(f[1]) + '</dd>'; }).join('');
@@ -1507,6 +1517,7 @@
     $('ep-post-tag').value = s.postTag || '';
     $('ep-install').value = s.installDate ? fmtDate(s.installDate) : '';
     fillSelect($('ep-status'), options(state.meta.stations, 'StationStatus'), s.status, '—');
+    $('ep-schedule').value = s.schedule || '';
     $('ep-notes').value = s.notes || '';
     openSheet('edit-panel');
   }
@@ -1521,11 +1532,12 @@
       PostTag: $('ep-post-tag').value.trim(),
       InstallDate: day ? new Date(day + 'T12:00:00').getTime() : null,
       StationStatus: $('ep-status').value || null,
+      Schedule: $('ep-schedule').value.trim(),
       Notes: $('ep-notes').value.trim()
     };
     var now = {
       PostInstalled: s.postInstalled || null, PostType: s.postType || null, PostTag: s.postTag || '',
-      InstallDate: s.installDate || null, StationStatus: s.status || null, Notes: s.notes || ''
+      InstallDate: s.installDate || null, StationStatus: s.status || null, Schedule: s.schedule || '', Notes: s.notes || ''
     };
     var changed = {};
     Object.keys(next).forEach(function (k) {
@@ -1558,6 +1570,7 @@
     $('np-site').value = near && nearD < 3000 ? near.site : '';
     $('np-mu').value = near && nearD < 300 ? near.mu : '';
     $('np-notes').value = '';
+    $('np-schedule').value = fieldDefault(state.meta.stations, 'Schedule') || DEFAULT_SCHEDULE;
     newPost = 'No';
     Array.prototype.forEach.call($('np-post-seg').children, function (b) { b.classList.toggle('on', b.dataset.v === newPost); });
     openSheet('new-panel');
@@ -1588,6 +1601,7 @@
       attrs: {
         StationID: id, SiteName: $('np-site').value.trim(), MgmtUnit: $('np-mu').value.trim(),
         PostInstalled: newPost, StationStatus: 'Active', Notes: $('np-notes').value.trim(),
+        Schedule: $('np-schedule').value.trim(),
         InstallDate: newPost === 'Yes' ? Date.now() : null
       },
       createdAt: Date.now(), state: 'pending', attempts: 0

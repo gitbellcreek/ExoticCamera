@@ -10,7 +10,7 @@ const ORDER = [
   'ui', 'ios', 'land', 'camera', 'import', 'roundtrip',    // browser
   'migrate', 'coldoffline', 'tag', 'edit-ui', 'snake',
   'pp-upload',                                             // Photo Points: node, no network
-  'pp-land', 'pp-coexist', 'pp-visit', 'pp-browse', 'pp-gps',   // browser, no service
+  'pp-land', 'pp-coexist', 'pp-visit', 'pp-browse', 'pp-gps', 'pp-station',   // browser, no service
   'pp-flow',                                               // browser, live service, Test station only
 ];
 const only = process.argv.slice(2);

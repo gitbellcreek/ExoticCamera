@@ -329,6 +329,7 @@
         postTag: a.PostTag || '',
         installDate: a.InstallDate || null,
         status: a.StationStatus || '',
+        schedule: a.Schedule || '',
         notes: a.Notes || '',
         lat: typeof gm.y === 'number' ? gm.y : null,
         lon: typeof gm.x === 'number' ? gm.x : null
