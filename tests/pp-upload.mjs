@@ -151,7 +151,7 @@ function makeStore() {
 function makeApp(service) {
   const Store = makeStore();
   const sb = { console, fetch: service.fetch, FormData, Blob, Response, URLSearchParams, TextEncoder, btoa, Date, Math, JSON,
-    Promise, Error, TypeError, String, Number, Object, Array, isFinite, parseInt, setTimeout, clearTimeout, AbortController,
+    Promise, Error, TypeError, String, Number, Object, Array, isFinite, parseInt, setTimeout, clearTimeout, setInterval, clearInterval, AbortController,
     crypto: globalThis.crypto, location: { origin: 'https://example.github.io', pathname: '/x/photopoints/' } };
   sb.self = sb;
   sb.Store = Store;
@@ -347,6 +347,53 @@ console.log('\n== the app was closed mid-upload');
   await settle(app);
   if (service.attachments.length !== 1 || !await intact(service, blobs, app)) fail('not uploaded after reclaiming');
   else ok('and then goes up');
+}
+
+console.log('\n== the app was killed mid-photo and left its upload lock behind');
+{
+  // the field report: visit up, 3 of 9 photos up, the 4th half sent, then iOS closed the app;
+  // reopened, "Upload now" did nothing because the dead page still held the queue
+  const { service, app, blobs } = await setup({ shots: 4, size: 3 * PART });
+  let n = 0;
+  const realFetch = service.fetch;
+  service.fetch = async (url, init) => {
+    if (String(url).endsWith('/uploadPart') && ++n === 13) throw new Error('page killed');   // chunk 2 of photo 4 (3 + 4 + 4 chunks before it)
+    return realFetch(url, init);
+  };
+  app.fetch = service.fetch;
+  await flush(app).catch(() => {});
+  service.fetch = realFetch; app.fetch = realFetch;
+  const v = (await app.Store.visits())[0];
+  const s4 = (await app.Store.shots()).find(s => s.state !== 'sent');
+  // what a killed page leaves: rows mid-flight and a lock it will never release
+  await app.Store.patchShot(s4.id, { state: 'uploading' });
+  await app.Store.patchVisit(v.id, { state: 'uploading' });
+  await app.Store.set('flushLock', { owner: 'the-page-that-was-closed', until: Date.now() + 5 * 60000 });
+  if (service.attachments.length !== 3) fail('expected 3 photos up before the kill, got ' + service.attachments.length);
+  else ok('3 of 4 photos up, the 4th half sent, when the app is killed');
+  const before = await flush(app);
+  if (!before.locked) fail('the leftover lock should block a drain until startup clears it');
+  else ok('before startup recovery the leftover lock blocks uploads (what the field saw)');
+  await app.Arc.reclaimStranded();
+  const after = await flush(app);
+  if (after.locked) fail('reopening the app did not free the queue');
+  else ok('reopening the app frees the queue at once');
+  await settle(app);
+  if (service.attachments.length !== 4 || !await intact(service, blobs, app)) fail('the rest did not go up intact: ' + service.attachments.length);
+  else ok('the half-sent photo resumes and all 4 arrive intact, each once');
+  if (service.visits.length !== 1) fail(service.visits.length + ' visits'); else ok('still one visit');
+}
+
+console.log('\n== a drainer that goes quiet lets the lock lapse');
+{
+  const { app } = await setup({ shots: 1 });
+  await app.Store.takeLock('flushLock', 60000, 'someone-else');      // as a live drainer takes it
+  const s1 = await flush(app);
+  if (!s1.locked || !(s1.lockedFor > 0 && s1.lockedFor <= 60000)) fail('a held lock should say how long it has left: ' + JSON.stringify(s1));
+  else ok('a busy queue is reported with how long until it frees (' + Math.round(s1.lockedFor / 1000) + 's)');
+  await app.Store.set('flushLock', { owner: 'someone-else', until: Date.now() - 1 });   // it stopped renewing
+  const s2 = await flush(app);
+  if (s2.locked) fail('an expired lock still blocks'); else ok('once it is not renewed, the next drain goes ahead');
 }
 
 console.log('\n== two drainers at once');

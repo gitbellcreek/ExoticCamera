@@ -60,22 +60,24 @@
       throw timedOut ? Timeout(late) : Retryable('Network unreachable');
     });
 
+    // the timer covers reading the reply too: a connection that drops after the
+    // headers would otherwise leave the body read, and the whole upload, waiting forever
     return new Promise(function (resolve, reject) {
       timer = setTimeout(function () {
         timedOut = true;
         if (ctl) ctl.abort();
         reject(Timeout(late));
       }, ms);
-      req.then(resolve, reject);
-    }).then(function (r) {
+      req.then(function (r) {
+        if (!r.ok) throw Retryable('HTTP ' + r.status);
+        return r.json().catch(function () { throw timedOut ? Timeout(late) : Retryable('Bad response'); });
+      }).then(resolve, reject);
+    }).then(function (j) {
       clearTimeout(timer);
-      return r;
+      return j;
     }, function (e) {
       clearTimeout(timer);
       throw e;
-    }).then(function (r) {
-      if (!r.ok) throw Retryable('HTTP ' + r.status);
-      return r.json().catch(function () { throw Retryable('Bad response'); });
     }).then(function (j) {
       if (j && j.error) {
         var code = j.error.code;
@@ -172,7 +174,12 @@
     return out;
   }
 
-  function lockStep(me) { return g.Store.takeLock('flushLock', 5 * 60000, me); }
+  /* One drainer at a time. The lock is short and the drainer renews it while it
+     is making progress, so a page that iOS killed mid-upload holds it for a
+     minute at most, not until some long timeout runs out. */
+  var LOCK_TTL = 60000, LOCK_BEAT = 15000, IDLE = 150000;
+  var activeAt = {};
+  function lockStep(me) { activeAt[me] = Date.now(); return g.Store.takeLock('flushLock', LOCK_TTL, me); }
 
   var Arc = {
     asError: asError,
@@ -467,6 +474,9 @@
         r[1].forEach(function (v) {
           if (v.state === 'uploading') jobs.push(g.Store.patchVisit(v.id, { state: 'queued' }));
         });
+        // ...and so does the upload lock it was holding: left alone it would keep
+        // this page from uploading, without a word, until it ran out
+        jobs.push(g.Store.del('flushLock'));
         return Promise.all(jobs);
       }).then(function () { return n; }).catch(function () { return 0; });
     },
@@ -491,12 +501,22 @@
       var ev = onEvent || function () {};
       var sum = { sent: 0, photos: 0, failed: 0, needAuth: false, offline: false, locked: false, waiting: 0 };
       var me = g.Store.uuid();
-      return g.Store.takeLock('flushLock', 5 * 60000, me).then(function (got) {
-        if (!got) { sum.locked = true; return sum; }
-        return Arc._drain(ev, opts, sum, me).then(function (r) {
-          return g.Store.releaseLock('flushLock', me).then(function () { return r; });
+      var beat = null;
+      var done = function () { clearInterval(beat); delete activeAt[me]; return g.Store.releaseLock('flushLock', me); };
+      var evs = function (type, row, extra) { activeAt[me] = Date.now(); return ev(type, row, extra); };
+      return lockStep(me).then(function (got) {
+        if (!got) {
+          sum.locked = true;
+          return g.Store.get('flushLock').then(function (l) { sum.lockedFor = l && l.until ? Math.max(0, l.until - Date.now()) : 0; return sum; });
+        }
+        // renew while work is happening; a drain that has stalled lets the lock lapse
+        beat = setInterval(function () {
+          if (Date.now() - (activeAt[me] || 0) < IDLE) g.Store.takeLock('flushLock', LOCK_TTL, me);
+        }, LOCK_BEAT);
+        return Arc._drain(evs, opts, sum, me).then(function (r) {
+          return done().then(function () { return r; });
         }, function (e) {
-          return g.Store.releaseLock('flushLock', me).then(function () { throw asError(e); });
+          return done().then(function () { throw asError(e); });
         });
       });
     },
