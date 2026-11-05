@@ -214,6 +214,7 @@
     <label class="fld"><span>Tag / marking</span><input type="text" id="ep-post-tag"></label>
     <label class="fld"><span>Install date</span><input type="date" id="ep-install"></label>
     <label class="fld"><span>Status</span><select id="ep-status"></select></label>
+    <label class="fld"><span>Schedule</span><input type="text" id="ep-schedule" list="schedule-list" maxlength="100" placeholder="e.g. Once a year: October"></label>
     <label class="fld"><span>Notes</span><textarea id="ep-notes" rows="3"></textarea></label>
     <p class="hint">Saved on the phone and sent to the layer with the next upload.</p>
     <div class="row">
@@ -233,7 +234,14 @@
     <label class="fld"><span>Management unit</span><input type="text" id="np-mu" spellcheck="false"></label>
     <div class="fld"><span>Post installed</span>
       <div class="seg" id="np-post-seg"><button data-v="Yes">Yes</button><button data-v="No" class="on">No</button></div></div>
+    <label class="fld"><span>Schedule</span><input type="text" id="np-schedule" list="schedule-list" maxlength="100"></label>
     <label class="fld"><span>Notes</span><textarea id="np-notes" rows="2"></textarea></label>
+    <datalist id="schedule-list">
+      <option value="Once a year: October"></option><option value="Once a year: November"></option>
+      <option value="Once a year: August"></option><option value="Twice a year: March and July"></option>
+      <option value="Twice a year: March and August"></option><option value="Twice a year: May and October"></option>
+      <option value="Twice a year: May and November"></option><option value="Every quarter"></option>
+    </datalist>
     <div class="row">
       <button class="btn" id="np-save">Add station</button>
       <button class="btn ghost" id="np-cancel">Cancel</button>

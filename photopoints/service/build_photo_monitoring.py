@@ -60,6 +60,7 @@ def coded(name, values):
 
 YES_NO = coded("PM_YesNo", ["Yes", "No"])
 POST_TYPE = coded("PM_PostType", ["Rebar", "T-post", "PVC", "Wood stake", "Other"])
+DEFAULT_SCHEDULE = "Once a year: October"
 STATION_STATUS = coded("PM_StationStatus", ["Active", "Damaged", "Missing", "Retired", "Inactive"])
 POST_CONDITION = coded(
     "PM_PostCondition",
@@ -95,6 +96,7 @@ STATION_FIELDS = [
     f("PostTag", "Post Tag / Marking", "esriFieldTypeString", 50),
     f("InstallDate", "Install Date", "esriFieldTypeDate", 8),
     f("StationStatus", "Station Status", "esriFieldTypeString", 25, STATION_STATUS),
+    dict(f("Schedule", "Schedule", "esriFieldTypeString", 100), defaultValue=DEFAULT_SCHEDULE),   # how often it is visited; free text
     f("Notes", "Notes", "esriFieldTypeString", 1000),
 ]
 
@@ -155,7 +157,7 @@ def service_definition():
                        "outline": {"color": [255, 255, 255, 255], "width": 1.25}},
         }},
         "templates": [{"name": "Photo Station", "drawingTool": "esriFeatureEditToolPoint",
-                       "prototype": {"attributes": {"StationStatus": "Active"}}}],
+                       "prototype": {"attributes": {"StationStatus": "Active", "Schedule": DEFAULT_SCHEDULE}}}],
         "relationships": [{
             "id": 0, "name": REL_NAME_FROM_STATION, "relatedTableId": 1,
             "cardinality": "esriRelCardinalityOneToMany", "role": "esriRelRoleOrigin",
@@ -263,6 +265,7 @@ def station_form():
                 fe("PostTag", "Tag / marking", dict(TEXT, maxLength=50), visibilityExpression="expr_has_post"),
                 fe("InstallDate", "Install date", DATE, visibilityExpression="expr_has_post"),
                 fe("StationStatus", "Status", COMBO),
+                fe("Schedule", "Schedule", TEXT),
                 fe("Notes", "Notes", AREA),
             ]},
             # "any" = shows every attachment on the station, whatever its keyword
