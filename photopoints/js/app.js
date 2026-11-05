@@ -348,17 +348,46 @@
     if (state.gpsDenied) { chip.className = 'chip bad'; label.textContent = 'denied'; return; }
     if (!state.pos) { chip.className = 'chip bad'; label.textContent = state.gpsError ? 'searching' : 'no fix'; return; }
     var acc = state.pos.coords.accuracy, age = fixAge();
-    label.textContent = (acc ? '±' + Math.round(acc) + 'm' : '--') + (age > 45000 ? ' · ' + ago(age) : '');
-    chip.className = 'chip ' + (age > 180000 ? 'bad' : age > 45000 || acc > 30 ? 'warn' : acc <= 10 ? 'ok' : 'warn');
+    // fixes come every second or two while it is working: a 15 s old one means the GPS has stalled, so say so
+    label.textContent = (acc ? '±' + Math.round(acc) + 'm' : '--') + (age > 15000 ? ' · ' + ago(age) : '');
+    chip.className = 'chip ' + (age > 180000 ? 'bad' : age > 15000 || acc > 30 ? 'warn' : acc <= 10 ? 'ok' : 'warn');
+  }
+
+  /* iOS can stop feeding a position watch without saying so — after the screen
+     locks, the app goes to the background, or just in the field — and some
+     fixes it does deliver are the same cached one again. The watch is restarted
+     when it goes quiet, when the page comes back, and when the GPS chip is
+     tapped; a repeated fix does not count as a new one. */
+  var gpsWatch = null, gpsStartedAt = 0, gpsRestartAt = 0, lastFixStamp = 0;
+  var GPS_QUIET = 20000;
+  function restartGPS(why, force) {
+    if (!navigator.geolocation) return false;
+    if (!force && Date.now() - gpsRestartAt < 15000) return false;
+    gpsRestartAt = Date.now();
+    if (gpsWatch !== null) { try { navigator.geolocation.clearWatch(gpsWatch); } catch (e) { /* gone already */ } }
+    Report.note('gps restart', why + (state.pos ? ', last fix ' + ago(fixAge()) + ' ago' : ', no fix yet'));
+    watchGPS();
+    return true;
   }
 
   var lastSortAt = 0, lastSortPos = null;
   function startGPS() {
     if (!navigator.geolocation) { toast('No GPS on this device', 'warn'); return; }
-    setInterval(renderGPS, 5000);
-    navigator.geolocation.watchPosition(function (p) {
+    setInterval(function () {
+      renderGPS();
+      if (!document.hidden && !state.gpsDenied && Date.now() - Math.max(state.posAt, gpsStartedAt) > GPS_QUIET) restartGPS('quiet');
+    }, 5000);
+    watchGPS();
+  }
+
+  function watchGPS() {
+    gpsStartedAt = Date.now();
+    gpsWatch = navigator.geolocation.watchPosition(function (p) {
+      var stamp = p.timestamp || Date.now();
+      if (stamp && stamp === lastFixStamp && state.pos) return;    // the same fix again, not a new one
+      lastFixStamp = stamp;
       state.pos = p;
-      state.posAt = Date.now();
+      state.posAt = Math.min(Date.now(), stamp);
       state.gpsError = null;
       state.gpsDenied = false;
       renderGPS();
@@ -380,7 +409,7 @@
         toast('Location permission denied — distances and photo positions need it', 'bad', 4000);
       }
       renderGPS();
-    }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 60000 });
+    }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 30000 });
   }
 
   /** The position to stamp on a photo: a recent fix, or failing that the station itself. */
@@ -1618,14 +1647,25 @@
     }
   }
 
+  var flushStartedAt = 0, flushActiveAt = 0, lockRetry = null;
   function sync(force) {
-    if (state.flushing) return Promise.resolve();
+    if (state.flushing) {
+      // a pass that iOS froze mid-request may never come back: after a while with
+      // nothing happening it no longer blocks a new one (the lock still keeps two apart)
+      if (Date.now() - Math.max(flushStartedAt, flushActiveAt) < 150000) {
+        if (force) toast('Already uploading', 'ok', 1500);
+        return Promise.resolve();
+      }
+      Report.note('upload pass stalled', ago(Date.now() - flushStartedAt) + ' — starting another');
+    }
     if (!state.counts.outstanding && !force) return Promise.resolve();
     state.flushing = true;
+    flushStartedAt = flushActiveAt = Date.now();
     document.body.classList.add('syncing');
     $('chip-queue').classList.add('busy');
     var sentPhotos = 0;
     return Arc.flush(function (type, row, extra) {
+      flushActiveAt = Date.now();
       if (type === 'progress') {
         state.progress[row.id] = extra;
         renderProgress(row.id);
@@ -1656,6 +1696,15 @@
       document.body.classList.remove('syncing');
       $('chip-queue').classList.remove('busy');
       return refreshCounts().then(function (c) {
+        if (sum.locked) {
+          // another pass holds the queue — or one the app lost when it closed; that lock runs out in a minute
+          var wait = Math.min(65000, (sum.lockedFor || 0) + 2000);
+          Report.note('upload waiting', 'queue locked for ' + ago(sum.lockedFor || 0));
+          if (force) toast('Another upload is still finishing — trying again in ' + Math.max(5, Math.round(wait / 1000)) + 's', 'warn', 3500);
+          clearTimeout(lockRetry);
+          lockRetry = setTimeout(function () { if (state.online && state.counts.outstanding) sync(true); }, Math.max(5000, wait));
+          return sum;
+        }
         if (sum.needAuth) { Sound.error(); toast('Sign in to ArcGIS to upload', 'bad', 5000); }
         else if (sum.offline) { Sound.retry(); toast('No connection to the server — it will keep trying', 'warn'); }
         else if (sentPhotos && !c.outstanding) { Sound.allClear(); toast('Everything is uploaded', 'ok'); }
@@ -2045,8 +2094,9 @@
     $('chip-net').addEventListener('click', function () { sync(true); });
     $('chip-gps').addEventListener('click', function () {
       var p = state.pos && state.pos.coords;
-      toast(p ? p.latitude.toFixed(6) + ', ' + p.longitude.toFixed(6) + ' ±' + Math.round(p.accuracy) + 'm, ' + ago(fixAge()) + ' ago'
-             : state.gpsDenied ? 'Location permission denied' : 'No fix yet');
+      restartGPS('chip tapped', true);
+      toast((p ? p.latitude.toFixed(6) + ', ' + p.longitude.toFixed(6) + ' ±' + Math.round(p.accuracy) + 'm, ' + ago(fixAge()) + ' ago'
+             : state.gpsDenied ? 'Location permission denied' : 'No fix yet') + (state.gpsDenied ? '' : ' — getting a fresh fix'));
     });
 
     // station sheet
@@ -2216,6 +2266,7 @@
       setNet(navigator.onLine);
       refreshCounts().then(function () { if (state.online && Config.get().autoSync) sync(); });
       if (state.view === 'cam') startCamera();
+      if (fixAge() > 10000) restartGPS('back on screen', true);    // iOS may have stopped the watch while hidden
     });
     window.addEventListener('pagehide', function () { stopCamera(); });
   }
