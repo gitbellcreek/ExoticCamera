@@ -35,7 +35,7 @@
   function slotOfKeyword(kw) {
     var k = String(kw || '').trim().toUpperCase();
     if (!k) return null;
-    // the backup Survey123 form names its photo questions North_eye_level, …, and uses those as keywords
+    // a Survey123 form names its photo questions North_eye_level, …, and uses those as keywords
     var spaced = k.replace(/[_-]+/g, ' ');
     for (var i = 0; i < SLOTS.length; i++) {
       if (SLOTS[i].key === k || SLOTS[i].word.toUpperCase() === spaced) return SLOTS[i].key;
