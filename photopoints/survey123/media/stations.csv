@@ -1,0 +1,58 @@
+name,label,StationID,SiteName,MgmtUnit,Schedule
+{E4B16193-8ECC-4FB1-98EE-1ECAF20E38F7},APB-PS01 — Apollo Beach,APB-PS01,Apollo Beach,APB_01,Twice a year: May and October
+{47EF0358-38AE-404F-A4C2-876AA6E5A54C},APB-PS02 — Apollo Beach,APB-PS02,Apollo Beach,APB_01,Twice a year: May and October
+{F2595BAE-0622-4F44-8E39-6679F06D2DB6},BBA-PS01 — Brooker Creek Buffer Addition,BBA-PS01,Brooker Creek Buffer Addition,BBA_10,Twice a year: March and August
+{6186F488-5AF3-429C-9648-22D2B50068B0},BBA-PS02 — Brooker Creek Buffer Addition,BBA-PS02,Brooker Creek Buffer Addition,BBA_05,Twice a year: March and August
+{AD17A9B1-6029-46F4-8D2E-49968A1885A1},BBA-PS03 — Brooker Creek Buffer Addition,BBA-PS03,Brooker Creek Buffer Addition,BBA_03,Twice a year: March and August
+{549DC40F-693D-4FEB-8A7C-033BCB5279D3},BBA-PS04 — Brooker Creek Buffer Addition,BBA-PS04,Brooker Creek Buffer Addition,BBA_02,Twice a year: March and August
+{33AE98AB-B076-4DB7-8A81-F04605F803EB},BBA-PS05 — Brooker Creek Buffer Addition,BBA-PS05,Brooker Creek Buffer Addition,BBA_01,Twice a year: March and August
+{CCD0E7F1-2201-4732-8141-E34326EA943F},BBS-PS01 — Balm Boyette Scrub,BBS-PS01,Balm Boyette Scrub,BBS_18c,Twice a year: May and November
+{1DC5D4C8-B2DF-4FD8-9813-29D0722756B1},BBS-PS02 — Balm Boyette Scrub,BBS-PS02,Balm Boyette Scrub,BBS_18b,Twice a year: May and November
+{E3365460-1673-4559-914E-4E4418E8C7BE},BBS-PS03 — Balm Boyette Scrub,BBS-PS03,Balm Boyette Scrub,BBS_18c,Twice a year: May and November
+{AFA15EAE-6AF9-45FC-BE32-2EF8B05BB003},BBS-PS04 — Balm Boyette Scrub,BBS-PS04,Balm Boyette Scrub,23a,Once a year: November
+{29B78ACE-3C7C-4731-89D7-099804827E3A},BBS-PS05 — Balm Boyette Scrub,BBS-PS05,Balm Boyette Scrub,22b,Once a year: November
+{D967D423-C5B7-4D91-9A18-D094E1C001AD},BBS-PS06 — Balm Boyette Scrub,BBS-PS06,Balm Boyette Scrub,22b,Once a year: November
+{10950644-7DBE-4EED-9848-CD38D33E1A26},BBS-PS07 — Balm Boyette Scrub,BBS-PS07,Balm Boyette Scrub,25d,Once a year: November
+{1147FDB8-F770-4B5D-A270-5A48E9FF58CD},BBS-PS08 — Balm Boyette Scrub,BBS-PS08,Balm Boyette Scrub,25d,Once a year: November
+{73D60A45-CBEE-4E81-91B2-EA666FBB39EA},BBS-PS09 — Balm Boyette Scrub,BBS-PS09,Balm Boyette Scrub,19b,Once a year: November
+{0B527B54-1C05-43AA-9EE8-DFBFCE68E7EA},BBS-PS10 — Balm Boyette Scrub,BBS-PS10,Balm Boyette Scrub,19b,Once a year: November
+{DD7568CA-4502-4DC6-8435-F6F7E7114872},BBS-PS11 — Balm Boyette Scrub,BBS-PS11,Balm Boyette Scrub,19b,Once a year: November
+{0D127654-E0B7-4013-9BC0-943ED4C4A3C1},BBS-PS12 — Balm Boyette Scrub,BBS-PS12,Balm Boyette Scrub,17b,Once a year: November
+{083B7BF2-C2FF-46A8-A96F-119ED3772965},BBS-PS13 — Balm Boyette Scrub,BBS-PS13,Balm Boyette Scrub,17b,Once a year: November
+{E249AB3C-2EF8-44F8-BA99-766AFD89B6A3},BCB-PS01 — Brooker Creek Buffer,BCB-PS01,Brooker Creek Buffer,BCB_03b,Twice a year: March and July
+{1F73C1EB-A993-41B0-B669-47C71711685C},BCB-PS02 — Brooker Creek Buffer,BCB-PS02,Brooker Creek Buffer,BCB_03b,Twice a year: March and July
+{E26A8F82-0B4C-4920-9CA1-F09477F59D1F},BCB-PS03 — Brooker Creek Buffer,BCB-PS03,Brooker Creek Buffer,BCB_03a,Twice a year: March and July
+{C635E078-F6ED-43A2-BBED-1446E1B5A71C},BCH-PS01 — Brooker Creek Headwaters Nature Preserve,BCH-PS01,Brooker Creek Headwaters Nature Preserve,BCH_04,Twice a year: March and July
+{2B285CD7-F2DC-4EAE-9282-9E963EA0182A},BCH-PS02 — Brooker Creek Headwaters Nature Preserve,BCH-PS02,Brooker Creek Headwaters Nature Preserve,BCH_09,Twice a year: March and July
+{13125C4D-1803-4FAF-AA23-D6E6B9669395},BCH-PS03 — Brooker Creek Headwaters Nature Preserve,BCH-PS03,Brooker Creek Headwaters Nature Preserve,BCH_03a,Twice a year: March and July
+{4FADF530-08BD-4EA8-B229-DEB356DBAB8C},BCH-PS04 — Brooker Creek Headwaters Nature Preserve,BCH-PS04,Brooker Creek Headwaters Nature Preserve,BCH_12,Twice a year: March and July
+{A9EFB5AE-3E2E-4078-B0D2-969EF7FD6EE7},BCH-PS05 — Brooker Creek Headwaters Nature Preserve,BCH-PS05,Brooker Creek Headwaters Nature Preserve,BCH_01c,Twice a year: March and July
+{F1C506DD-D0A4-4B61-8165-A51F9D5A4C11},BWC-PS01 — Blackwater Creek,BWC-PS01,Blackwater Creek,BWC_03,Once a year: November
+{7EA7E8A4-FA3F-4F16-B9C0-9D989AFB1A82},BWC-PS02 — Blackwater Creek,BWC-PS02,Blackwater Creek,BWC_19,Once a year: November
+{A2ABB7FD-D00F-441D-8637-2A13EEC86E4C},CYC-PS02 — Cypress Creek,CYC-PS02,Cypress Creek,CYC_05b,Twice a year: March and July
+{F70EED80-8BB6-4819-B69B-43B34044810F},CYC-PS03 — Cypress Creek,CYC-PS03,Cypress Creek,CYC_02a,Twice a year: March and July
+{FCC49411-0E6E-4717-AB1D-F74F3CB2C449},DYF-PS01 — Dairy Farm,DYF-PS01,Dairy Farm,DYF_02,Once a year: November
+{5FC85428-B70B-455E-B205-C46241D894B2},DYF-PS02 — Dairy Farm,DYF-PS02,Dairy Farm,DYF_02,Once a year: November
+{930A812A-A76A-4CF0-A31D-8847B5C9BD49},DYF-PS03 — Dairy Farm,DYF-PS03,Dairy Farm,DYF_04,Once a year: November
+{3F3E7859-BDB6-42F2-A839-05162BC539A3},ENC-PS01 — English Creek,ENC-PS01,English Creek,ENC_02,Once a year: November
+{E3B333B3-EDFC-43F4-B716-1A2128D8B76C},ENC-PS02 — English Creek,ENC-PS02,English Creek,ENC_03,Once a year: November
+{9B01625F-01A3-4054-9B42-BD92381434EA},ENC-PS03 — English Creek,ENC-PS03,English Creek,ENC_01,Once a year: November
+{F772CB87-7477-472F-A737-CBDD2E8A05BF},ENC-PS04 — English Creek,ENC-PS04,English Creek,ENC_01,Once a year: November
+{84B7B97E-6918-4003-9AD7-241A176E265D},FSH-PS01 — Fish Hawk Creek,FSH-PS01,Fish Hawk Creek,FSH_53,Twice a year: May and October
+{9ACAC89E-177A-4651-9C51-3A8D11FB5AA5},FSH-PS02 — Fish Hawk Creek,FSH-PS02,Fish Hawk Creek,FSH_54,Twice a year: May and October
+{3DE3D5DD-8028-4E7E-9EF2-C50BDB701576},LGS-PS01 — Lower Green Swamp,LGS-PS01,Lower Green Swamp,LGS_15,Once a year: August
+{0C855C54-421E-4272-930D-92A51FE0920A},LGS-PS02 — Lower Green Swamp,LGS-PS02,Lower Green Swamp,LGS_11,Once a year: August
+{B2E4130C-E2DA-4DD1-8080-0F50021E7768},LGS-PS03 — Lower Green Swamp,LGS-PS03,Lower Green Swamp,LGS_47,Once a year: August
+{2834A38B-29D1-4575-8076-0B3C5C59A6BB},LGS-PS04 — Lower Green Swamp,LGS-PS04,Lower Green Swamp,LGS_41,Once a year: August
+{8B873AAB-68F5-40F2-8F5F-772435BB5B74},LGS-PS05 — Lower Green Swamp,LGS-PS05,Lower Green Swamp,LGS_30,Once a year: August
+{C743EDD7-853D-4686-B662-87C005FB784E},LGS-PS06 — Lower Green Swamp,LGS-PS06,Lower Green Swamp,LGS_23,Once a year: August
+{3430E7A6-8CE9-4464-B9CE-E4DE99CC2B3E},LGS-PS07 — Lower Green Swamp,LGS-PS07,Lower Green Swamp,LGS_45,Once a year: August
+{9A98F05F-86DF-4215-B1BC-E2F273C7D412},LGS-PS08 — Lower Green Swamp,LGS-PS08,Lower Green Swamp,LGS_46,Once a year: August
+{D35648CB-BFCF-4E8C-A70E-8E10B7E65D37},LKD-PS01 — Lake Dan Nature Preserve,LKD-PS01,Lake Dan Nature Preserve,LKD_33,Twice a year: March and July
+{37F0FC65-6485-4F21-8C16-554D8FEC7837},LKD-PS02 — Lake Dan Nature Preserve,LKD-PS02,Lake Dan Nature Preserve,LKD_30,Twice a year: March and July
+{431ACCB9-07B1-49DE-8461-E7C564254081},RCT-PS01 — Rocky Creek Trails Nature Preserve,RCT-PS01,Rocky Creek Trails Nature Preserve,RCT_02,Twice a year: March and August
+{19E23AF0-2DEE-43CE-85F4-70B81B5958A9},RCT-PS02 — Rocky Creek Trails Nature Preserve,RCT-PS02,Rocky Creek Trails Nature Preserve,RCT_02,Twice a year: March and August
+{16F8F403-175D-4993-8F0C-B6BA8925B363},VCU-PS01 — Violet Cury,VCU-PS01,Violet Cury,VCU_12,Twice a year: March and July
+{EF67502A-7AD2-485E-B9B1-A3B0433AED65},VCU-PS02 — Violet Cury,VCU-PS02,Violet Cury,VCU_08,Twice a year: March and July
+{F2FE3310-EDAF-4402-B4DB-CB07551CD385},VCU-PS03 — Violet Cury,VCU-PS03,Violet Cury,VCU_07,Twice a year: March and July
+{8C89D470-EDA7-40E2-BD3B-D7FD1B2E3C21},VCU-PS04 — Violet Cury,VCU-PS04,Violet Cury,VCU_05,Twice a year: March and July

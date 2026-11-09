@@ -177,7 +177,8 @@ async function setup({ shots = 3, size = 600 * 1024, stationPending = false } = 
     globalThis.__kwChecked = true;
     // keywords: spelled out since Nov 2026 so a popup filter can pick a direction or a level; the old shorthand still reads
     const cases = [['North groundcover', 'LOW_N'], ['north eye level', 'N'], ['West-groundcover', 'LOW_W'], ['Post', 'LOCATOR'], ['Other', 'MISC'],
-      ['N', 'N'], ['LOW_S', 'LOW_S'], ['LOCATOR', 'LOCATOR'], ['MISC', 'MISC'], ['', null], ['whatever', null]];
+      ['N', 'N'], ['LOW_S', 'LOW_S'], ['LOCATOR', 'LOCATOR'], ['MISC', 'MISC'], ['', null], ['whatever', null],
+      ['North_eye_level', 'N'], ['West_groundcover', 'LOW_W'], ['South_eye_level', 'S']];          // the Survey123 form's question names
     const bad = cases.filter(([k, w]) => Config.slotOfKeyword(k) !== w);
     if (bad.length) console.log('  FAIL keywords read wrongly: ' + JSON.stringify(bad)), process.exitCode = 1;
     else console.log('  ok   keywords: spelled-out and old shorthand both read; written as ' + Config.keyword('LOW_E') + ' / ' + Config.namePart('LOW_E'));

@@ -30,12 +30,15 @@
      groundcover"), so a popup's attachment filter, which matches any part of
      the keyword, can pick out a direction ("North") or a level ("groundcover")
      cleanly. Photos saved before November 2026 carry the old shorthand (N,
-     LOW_N, LOCATOR, MISC); both are read. */
+     LOW_N, LOCATOR, MISC); both are read, and so are the backup Survey123
+     form's question names (North_eye_level). */
   function slotOfKeyword(kw) {
     var k = String(kw || '').trim().toUpperCase();
     if (!k) return null;
+    // the backup Survey123 form names its photo questions North_eye_level, …, and uses those as keywords
+    var spaced = k.replace(/[_-]+/g, ' ');
     for (var i = 0; i < SLOTS.length; i++) {
-      if (SLOTS[i].key === k || SLOTS[i].word.toUpperCase() === k || SLOTS[i].word.toUpperCase().replace(/ /g, '-') === k) return SLOTS[i].key;
+      if (SLOTS[i].key === k || SLOTS[i].word.toUpperCase() === spaced) return SLOTS[i].key;
     }
     return null;
   }
