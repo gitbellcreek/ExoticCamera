@@ -140,6 +140,15 @@ body.syncing #topbar::after {
    only ever animates opacity and transform, so opening it costs nothing but a
    composite — no layout, no reflow of the viewfinder. */
 #tagger { position: fixed; left: 12px; top: calc(var(--safe-t) + 122px); z-index: 35; }
+#size-toggle {
+  position: fixed; left: 12px; top: calc(var(--safe-t) + 160px); z-index: 34;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line);
+  background: #0e131cd9; color: var(--dim); font: inherit; font-size: 12px; font-weight: 600;
+  backdrop-filter: blur(6px);
+}
+#size-toggle .ico { font-size: 13px; line-height: 1; }
+#size-toggle.on { color: #ffe9a8; border-color: #b8901f; background: #2b2410dd; }
 
 #tag-toggle {
   display: inline-flex; align-items: center; gap: 6px; max-width: 62vw;
@@ -186,6 +195,7 @@ body.syncing #topbar::after {
 
 @media (orientation: landscape) and (max-height: 560px) {
   #tagger { top: calc(var(--safe-t) + 96px); }
+  #size-toggle { top: calc(var(--safe-t) + 134px); }
   #tag-card { width: min(260px, calc(100vw - 120px)); }
 }
 

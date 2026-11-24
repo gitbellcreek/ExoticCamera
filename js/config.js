@@ -36,6 +36,7 @@
 
     maxDim: 1600,                             // long edge of the uploaded JPEG
     quality: 0.8,
+    fullSize: false,                          // the camera's full resolution (and an imported JPEG as it is), sent in pieces
     saveToDevice: false,                      // per-shot share sheet: off, it interrupts shooting
     keepHours: 48,                            // how long the local JPEG is kept after upload
     sound: true,

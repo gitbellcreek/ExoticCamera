@@ -42,7 +42,21 @@
      a time, one hung upload holds up every photo behind it, with nothing written
      back to say so. iOS then suspends the app mid-request and even the timer is
      lost. A deadline turns that into an ordinary retry that leaves a trace. */
-  var TIMEOUTS = { json: 30000, upload: 120000 };   // upload: a big attachment on a poor field connection
+  var TIMEOUTS = { json: 30000, upload: 120000, part: 90000 };   // upload: a big attachment on a poor field connection
+
+  /* A photo over CHUNK_OVER goes up in PART-sized pieces (uploads/register →
+     uploadPart → commit → addAttachment with the upload id), each piece
+     recorded as it lands, so a dropped connection or a closed app costs one
+     piece, not the whole photo. Full-size photos are 3–8 MB; smaller ones go
+     in one request as before. */
+  var CHUNK_OVER = 1536 * 1024, PART = 1024 * 1024;
+
+  /* One drainer at a time. The lock is short and the drainer renews it while
+     it is making progress, so a page iOS killed mid-upload holds it for a
+     minute at most, and a long full-size upload never loses it to a second
+     drainer that would send the same photo again. */
+  var LOCK_TTL = 60000, LOCK_BEAT = 15000, IDLE = 150000;
+  var activeAt = {};
 
   function postJson(url, body, timeoutMs) {
     var ms = timeoutMs || TIMEOUTS.json;
@@ -398,6 +412,82 @@
       });
     },
 
+    /** The service an upload id belongs to: the layer URL without its layer number. */
+    serviceOf: function (layerUrl) { return String(layerUrl).replace(/\/\d+\/?$/, ''); },
+
+    /**
+     * A big photo in pieces. Resumes from the pieces already recorded on the
+     * queue row; an upload the service has forgotten (expired, or used) is
+     * dropped and the photo starts again.
+     */
+    addAttachmentChunked: function (item, objectId, blob, name, layerUrl, onProgress) {
+      var url = layerUrl || g.Config.layerUrl(), svc = Arc.serviceOf(url), t;
+      var row = { uploadId: item.uploadId || null, parts: (item.upParts || []).slice() };
+      var total = Math.max(1, Math.ceil(blob.size / PART));
+      var gone = function (e) {
+        var m = (e && e.message) || '';
+        return !!e && !e.retryable && !e.needAuth && /upload|item/i.test(m) && /unable|invalid|not found|expired|does not exist/i.test(m);
+      };
+      var reset = function (e) {
+        return g.Store.patch(item.id, { uploadId: null, upParts: [] }).then(function () {
+          throw new Error('The half-sent upload expired on the server — the photo will start again (' + e.message + ')');
+        });
+      };
+      return token().then(function (tok) {
+        t = tok;
+        if (row.uploadId) return row.uploadId;
+        return postJson(svc + '/uploads/register', {
+          f: 'json', token: t, itemName: name, description: 'Exotic Camera photo'
+        }).then(function (j) {
+          var id = j.item && j.item.itemID;
+          if (!id) throw new Error('The service did not accept the upload');
+          row.uploadId = id; row.parts = [];
+          return g.Store.patch(item.id, { uploadId: id, upParts: [] }).then(function () { return id; });
+        });
+      }).then(function (upId) {
+        var todo = [];
+        for (var n = 1; n <= total; n++) if (row.parts.indexOf(n) < 0) todo.push(n);
+        if (onProgress) onProgress({ done: row.parts.length, total: total, size: blob.size });
+        return todo.reduce(function (chain, n) {
+          return chain.then(function () {
+            var fd = new FormData();
+            fd.append('f', 'json');
+            fd.append('token', t);
+            fd.append('partId', String(n));
+            fd.append('file', blob.slice((n - 1) * PART, Math.min(blob.size, n * PART)), 'part' + n);
+            return postJson(svc + '/uploads/' + upId + '/uploadPart', fd, TIMEOUTS.part).then(function () {
+              row.parts.push(n);
+              if (onProgress) onProgress({ done: row.parts.length, total: total, size: blob.size });
+              return g.Store.patch(item.id, { upParts: row.parts.slice() });
+            });
+          });
+        }, Promise.resolve()).then(function () {
+          var all = [];
+          for (var k = 1; k <= total; k++) all.push(k);
+          return postJson(svc + '/uploads/' + upId + '/commit', { f: 'json', token: t, parts: all.join(',') }, TIMEOUTS.upload)
+            .catch(function (e) { if (/already/i.test(e.message || '')) return null; throw e; });
+        }).then(function () {
+          return postJson(url + '/' + objectId + '/addAttachment', { f: 'json', token: t, uploadId: upId }, TIMEOUTS.upload);
+        });
+      }).then(function (j) {
+        var res = j.addAttachmentResult;
+        if (!res || !res.success) {
+          throw new Error((res && res.error && res.error.description) || 'Attachment rejected');
+        }
+        return g.Store.patch(item.id, { uploadId: null, upParts: [] }).then(function () { return res.objectId; });
+      }).catch(function (e) {
+        e = asError(e);
+        if (gone(e)) return reset(e);
+        if (e.retryable) {
+          // as in addAttachment: a stored Blob that cannot be read fails like the network does
+          return blob.slice(0, 1).arrayBuffer().then(function () { throw e; }, function () {
+            throw new Error('The photo could not be read back from this device — its local copy is gone');
+          });
+        }
+        throw e;
+      });
+    },
+
     addAttachment: function (objectId, blob, name, layerUrl) {
       var url = layerUrl || g.Config.layerUrl();
       return token().then(function (t) {
@@ -426,7 +516,7 @@
     },
 
     /** Push one queued photo. Resumes at whichever half is still missing. */
-    uploadItem: function (item) {
+    uploadItem: function (item, onProgress) {
       // pendingEdit is only ever set on a photo that is already up there. Do not
       // test state here: the drain loop marks the row "uploading" first, so a
       // state check would miss the edit and quietly mark it done instead.
@@ -468,6 +558,7 @@
           return landed.then(function (aid) {
             if (aid) return aid;
             return g.Store.patch(item.id, { attachTried: true }).then(function () {
+              if (blob.size > CHUNK_OVER) return Arc.addAttachmentChunked(item, oid, blob, name, url, onProgress);
               return Arc.addAttachment(oid, blob, name, url);
             });
           });
@@ -552,7 +643,11 @@
             lastError: 'Interrupted — the app closed mid-upload',
             nextAttemptAt: 0
           });
-        })).then(function () { return stuck.length; });
+        }).concat([
+          // ...and the upload lock the closed page was holding: left alone it keeps
+          // this page from uploading, without a word, until it runs out
+          g.Store.del ? g.Store.del('flushLock') : null
+        ])).then(function () { return stuck.length; });
       }).catch(function () { return 0; });
     },
 
@@ -576,12 +671,20 @@
       var me = (g.Store.uuid && g.Store.uuid()) || String(Date.now());
 
       // one drainer at a time: the page and the service worker share this queue
-      return g.Store.takeLock('flushLock', 120000, me).then(function (got) {
+      var beat = null;
+      var done = function () { clearInterval(beat); delete activeAt[me]; return g.Store.releaseLock('flushLock', me); };
+      var evs = function (type, item, extra) { activeAt[me] = Date.now(); return ev(type, item, extra); };
+      activeAt[me] = Date.now();
+      return g.Store.takeLock('flushLock', LOCK_TTL, me).then(function (got) {
         if (!got) { summary.locked = true; return summary; }
-        return Arc._drain(ev, opts, summary).then(function (r) {
-          return g.Store.releaseLock('flushLock', me).then(function () { return r; });
+        // renewed while work is happening; a drain that has stalled lets it lapse
+        beat = setInterval(function () {
+          if (Date.now() - (activeAt[me] || 0) < IDLE) g.Store.takeLock('flushLock', LOCK_TTL, me);
+        }, LOCK_BEAT);
+        return Arc._drain(evs, opts, summary).then(function (r) {
+          return done().then(function () { return r; });
         }).catch(function (e) {
-          return g.Store.releaseLock('flushLock', me).then(function () { throw e; });
+          return done().then(function () { throw e; });
         });
       });
     },
@@ -601,7 +704,7 @@
             return g.Store.patch(item.id, { state: 'uploading' }).then(function () {
               return g.Store.item(item.id);
             }).then(function (live) {
-              return Arc.uploadItem(live || item);
+              return Arc.uploadItem(live || item, function (p) { ev('progress', item, p); });
             }).then(function () {
               summary.sent++;
               ev('sent', item);

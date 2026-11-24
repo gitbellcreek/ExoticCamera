@@ -26,7 +26,8 @@
     busy: false,
     counts: { outstanding: 0, error: 0, sent: 0, total: 0 },
     auth: null,
-    timer: null
+    timer: null,
+    progress: {}                                    // photo id → { done, total, size } while it goes up in pieces
   };
 
   /* ───────────────────────────── toasts ───────────────────────────── */
@@ -362,7 +363,10 @@
 
     var open = navigator.mediaDevices.getUserMedia({
       audio: false,
-      video: { facingMode: { ideal: state.facing }, width: { ideal: 2560 }, height: { ideal: 1920 } }
+      // full size: the most the camera will stream (4032×3024 on a recent iPhone)
+      video: Config.get().fullSize
+        ? { facingMode: { ideal: state.facing }, width: { ideal: 4032 }, height: { ideal: 3024 }, aspectRatio: { ideal: 4 / 3 } }
+        : { facingMode: { ideal: state.facing }, width: { ideal: 2560 }, height: { ideal: 1920 } }
     }).then(function (s) {
       settled = true;
       state.stream = s;
@@ -488,7 +492,7 @@
 
   function drawToBlob(source, sw, sh) {
     var c = Config.get();
-    var scale = Math.min(1, c.maxDim / Math.max(sw, sh));
+    var scale = c.fullSize ? 1 : Math.min(1, c.maxDim / Math.max(sw, sh));
     var w = Math.round(sw * scale), h = Math.round(sh * scale);
     var cv = document.createElement('canvas');
     cv.width = w; cv.height = h;
@@ -501,7 +505,8 @@
     var thumb = tc.toDataURL('image/jpeg', 0.6);
 
     return new Promise(function (res) {
-      cv.toBlob(function (b) { res({ blob: b, w: w, h: h, thumb: thumb }); }, 'image/jpeg', c.quality);
+      cv.toBlob(function (b) { res({ blob: b, w: w, h: h, thumb: thumb, full: !!c.fullSize }); }, 'image/jpeg',
+        c.fullSize ? Math.max(c.quality, 0.92) : c.quality);
     });
   }
 
@@ -574,6 +579,8 @@
     var item = {
       id: Store.uuid(),
       createdAt: Date.now(),
+      full: !!img.full,
+      bytes: img.blob && img.blob.size,
       blob: img.blob,
       thumb: img.thumb,
       w: img.w, h: img.h,
@@ -980,15 +987,31 @@
     });
   }
 
+  /** The photo's own bytes, copied out of the File (a File from the picker can go stale), and a thumbnail. */
+  function originalJpeg(file, src, w, h) {
+    var tc = document.createElement('canvas');
+    var ts = Math.min(1, 160 / Math.max(w, h));
+    tc.width = Math.round(w * ts); tc.height = Math.round(h * ts);
+    tc.getContext('2d').drawImage(src, 0, 0, tc.width, tc.height);
+    var thumb = tc.toDataURL('image/jpeg', 0.6);
+    return file.arrayBuffer().then(function (buf) {
+      return { blob: new Blob([buf], { type: 'image/jpeg' }), w: w, h: h, thumb: thumb, full: true, original: true };
+    });
+  }
+
   function importOne(file) {
     return Exif.read(file).then(function (ex) {
       if (!ex.found || ex.lat === null || ex.lon === null) {
         return { skipped: 'no location' };
       }
+      var keep = Config.get().fullSize && /^image\/jpe?g$/i.test(file.type || '');
       return decodeOriented(file).then(function (src) {
         var w = src.width || src.naturalWidth, h = src.height || src.naturalHeight;
         if (!w || !h) throw new Error('Could not read this image');
-        return drawToBlob(src, w, h).then(function (img) {
+        // full size: a JPEG goes up exactly as the phone has it — every pixel and all
+        // its EXIF (location, bearing, camera); anything else is re-encoded at full size
+        var made = keep ? originalJpeg(file, src, w, h) : drawToBlob(src, w, h);
+        return made.then(function (img) {
           if (src.close) src.close();
           var item = {
             id: Store.uuid(),
@@ -1009,6 +1032,8 @@
             make: ex.make || 'Exotic Camera',
             model: ex.model || (ex.camera || 'imported'),
             source: 'import',
+            full: !!img.full,
+            bytes: img.blob && img.blob.size,
             serviceUrl: Config.get().serviceUrl,
             layerId: Config.get().layerId,
             layerName: Config.layerName(),
@@ -1016,7 +1041,7 @@
           };
           applyTag(item);
           item.filename = photoName(item);
-          return Exif.write(img.blob, exifMeta(item)).then(function (stamped) {
+          return (img.original ? Promise.resolve(img.blob) : Exif.write(img.blob, exifMeta(item))).then(function (stamped) {
             item.blob = stamped;
             return Store.add(item);
           }).then(function () {
@@ -1112,6 +1137,42 @@
     }
   }
 
+  function fmtMB(bytes) { return (bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0) + ' MB'; }
+
+  /** "42% of 5.8 MB" for a photo going up in pieces. */
+  function progressText(id) {
+    var p = state.progress[id];
+    return p && p.total > 1 ? ' ' + Math.round(p.done / p.total * 100) + '% of ' + fmtMB(p.size) : '';
+  }
+
+  var qpTimer = null;
+  function renderQueueProgress() {
+    if (qpTimer) return;
+    qpTimer = setTimeout(function () { qpTimer = null; if (sheetOpen('queue-panel')) renderQueue(); }, 700);
+  }
+
+  /* ── photo size: full resolution or the standard size, one tap on the camera screen ── */
+  function renderSizeToggle() {
+    var on = !!Config.get().fullSize;
+    var b = $('size-toggle');
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    $('size-label').textContent = on ? 'Full size' : (Config.get().maxDim || 1600) + ' px';
+  }
+
+  function toggleSize() {
+    var on = !Config.get().fullSize;
+    return Config.save({ fullSize: on }).then(function () {
+      renderSizeToggle();
+      Report.note('photo size', on ? 'full' : 'standard');
+      toast(on ? 'Full-size photos on — bigger uploads, sent in pieces that resume'
+               : 'Full-size photos off — ' + (Config.get().maxDim || 1600) + ' px', on ? 'warn' : 'ok', 3200);
+      Sound.tick();
+      if (state.stream) { stopCamera(); return startCamera(); }    // ask the camera for the other resolution
+      return null;
+    });
+  }
+
   function sync(force) {
     if (state.flushing) return Promise.resolve();
     if (!state.counts.outstanding && !force) return Promise.resolve();
@@ -1120,10 +1181,16 @@
 
     var sentAny = false;
     return Arc.flush(function (type, item, err) {
+      if (type === 'progress') {
+        state.progress[item.id] = err;                // here the third argument is { done, total, size }
+        if (sheetOpen('queue-panel')) renderQueueProgress();
+        return;
+      }
       if (type === 'start') {
         Report.note('upload start', item.id);
         $('chip-queue').classList.add('busy');
       } else if (type === 'sent') {
+        delete state.progress[item.id];
         sentAny = true;
         Sound.sent();
         buzz(10);
@@ -1223,7 +1290,7 @@
               ? 'OBJECTID ' + r.objectId + ' · filed without a photo'
               : 'uploaded · OBJECTID ' + (r.objectId || '?'))
           : r.state === 'error' ? esc(r.lastError || 'failed')
-          : r.state === 'uploading' ? 'uploading…'
+          : r.state === 'uploading' ? 'uploading…' + progressText(r.id)
           // A connection failure deliberately doesn't raise `attempts`, which used
           // to mean a row failing every minute for hours still read "waiting"
           // with no error at all. Count those too, or a stuck photo is invisible.
@@ -1233,6 +1300,7 @@
         if (noPhoto && r.state !== 'sent') sub = 'point filed, photo still owed · ' + sub;
         var where = r.layerName && r.layerName !== Config.layerName() ? ' → ' + esc(r.layerName) : '';
         if (r.source === 'import') where = ' · imported' + where;
+        if (r.full) where = ' · full size' + (r.bytes ? ' ' + fmtMB(r.bytes) : '') + where;
         if (r.feature) where = ' · ' + esc(r.feature) + where;
         return '<div class="qrow ' + r.state + (r.pendingEdit ? ' edited' : '') + '">' +
           '<div class="qthumb" style="background-image:url(' + (r.thumb || '') + ')"></div>' +
@@ -1353,6 +1421,7 @@
     $('s-layer').value = c.layerId;
     $('s-appid').value = c.appId;
     $('s-portal').value = c.portal;
+    $('s-fullsize').checked = !!c.fullSize;
     $('s-maxdim').value = c.maxDim;
     $('s-quality').value = c.quality;
     $('s-quality-out').textContent = c.quality;
@@ -1374,6 +1443,7 @@
       layerId: parseInt($('s-layer').value, 10) || 0,
       appId: $('s-appid').value.trim(),
       portal: $('s-portal').value.trim() || 'https://www.arcgis.com',
+      fullSize: $('s-fullsize').checked,
       maxDim: parseInt($('s-maxdim').value, 10) || 1600,
       quality: parseFloat($('s-quality').value) || 0.8,
       saveToDevice: $('s-savedevice').checked,
@@ -1387,12 +1457,15 @@
       var el = $('s-f-' + k);
       if (el) patch.fields[k] = el.value.trim();
     });
+    var wasFull = !!Config.get().fullSize;
     return Config.save(patch).then(function (c) {
       var p = Config.activePreset();
       return Config.save({ activeLayer: p ? p.id : 'custom' });
     }).then(function (c) {
       Sound.setEnabled(c.sound);
       Sound.tick();
+      renderSizeToggle();
+      if (wasFull !== !!c.fullSize && state.stream) { stopCamera(); startCamera(); }
       renderLayerPicker();
       refreshTagFields();
       toast('Settings saved — photos go to ' + Config.layerName(), 'ok');
@@ -1580,6 +1653,7 @@
     $('preview').addEventListener('click', function () {
       if (!cameraHealthy() || previewStalled()) { lastRecovery = 0; recoverCamera('tapped the preview'); }
     });
+    $('size-toggle').addEventListener('click', function () { Sound.unlock(); toggleSize(); });
     $('flip-cam').addEventListener('click', function () {
       state.facing = state.facing === 'environment' ? 'user' : 'environment';
       Sound.tick();
@@ -1809,6 +1883,7 @@
 
     Config.load().then(function (c) {
       Sound.setEnabled(c.sound);
+      renderSizeToggle();
       $('mi-about-sub').textContent = 'build ' + buildLabel();
       $('mi-layer-sub').textContent = Config.layerName();
       return Arc.completeOAuth().catch(function (e) {
