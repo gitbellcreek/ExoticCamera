@@ -96,7 +96,7 @@ function makeApp(server) {
     outstanding: async () => [...queue.values()].filter(i => i.state !== 'sent'),
   };
   const sb = { console, fetch: server.fetch, FormData, Blob, URLSearchParams, crypto, TextEncoder, btoa, Date, Math, JSON,
-               Promise, Error, String, Number, Object, Array, isFinite, parseInt, setTimeout, clearTimeout, AbortController,
+               Promise, Error, String, Number, Object, Array, isFinite, parseInt, setTimeout, clearTimeout, setInterval, clearInterval, AbortController,
                location: { origin: 'https://example.github.io' } };
   sb.self = sb;
   vm.createContext(sb);

@@ -62,6 +62,9 @@
   <button id="flip-cam" class="round" aria-label="Switch camera">⟳</button>
 </footer>
 
+<!-- ── photo size: full resolution or the standard 1600 px ──── -->
+<button id="size-toggle" aria-pressed="false" title="Photo size"><span class="ico">⛶</span><span id="size-label">1600 px</span></button>
+
 <!-- ── session tag: sticks to every photo until cleared ──────── -->
 <div id="tagger" class="hidden">
   <button id="tag-toggle" aria-expanded="false" aria-controls="tag-card">
@@ -154,7 +157,12 @@
       <input type="url" id="s-portal" spellcheck="false" autocapitalize="off"></label>
     <p class="hint">Redirect URI to register on the ArcGIS app: <code id="s-redirect"></code></p>
 
-    <label class="fld"><span>Image long edge (px)</span>
+    <label class="fld chk"><input type="checkbox" id="s-fullsize"><span>Full-size photos</span></label>
+    <p class="hint">The camera's full resolution, and photos added from the phone kept exactly as
+      they are. Each is 3–8 MB instead of about 0.5 MB, so uploads take longer: they go in
+      1 MB pieces that pick up where they stopped when the signal drops or the app closes.
+      The <b>⛶</b> button on the camera screen switches this too.</p>
+    <label class="fld"><span>Image long edge (px) when not full size</span>
       <input type="number" id="s-maxdim" min="480" max="4096" step="80"></label>
     <label class="fld"><span>JPEG quality</span>
       <input type="range" id="s-quality" min="0.4" max="0.95" step="0.05">

@@ -5,9 +5,10 @@ import path from 'node:path';
 import { HERE } from './env-lite.mjs';
 
 const ORDER = [
-  'compass', 'dedupe',                                     // node, no network
+  'compass', 'dedupe', 'ec-upload',                        // node, no network
   'layers', 'e2e', 'resilience', 'edit-server',            // node, no browser
   'ui', 'ios', 'land', 'camera', 'import', 'roundtrip',    // browser
+  'ec-fullsize',
   'migrate', 'coldoffline', 'tag', 'edit-ui', 'snake',
   'pp-upload',                                             // Photo Points: node, no network
   'pp-land', 'pp-coexist', 'pp-visit', 'pp-browse', 'pp-gps', 'pp-station',   // browser, no service
